@@ -27,8 +27,8 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Load Balancer (HAProxy)                  │
-└────────────────────────────┬────────────────────────────────────┘
+│                    Load Balancer (HAProxy)                       │
+└────────────────────────────┬─────────────────────────────────────┘
                              │
         ┌────────────────────┴────────────────────┐
         │                                         │
@@ -43,6 +43,7 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
         │                │                │
 ┌───────▼────────┐ ┌────▼─────┐ ┌───────▼────────┐
 │ Session Service│ │ Auth Svc │ │  Quiz Service  │
+│                │ │          │ │  + RAG Docs    │
 └───────┬────────┘ └────┬─────┘ └───────┬────────┘
         │               │               │
         └───────────────┼───────────────┘
@@ -55,48 +56,204 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
         │               │               │
         └───────────────┼───────────────┘
                         │
-        ┌───────────────┼───────────────────────┐
-        │               │                       │
-┌───────▼────────┐ ┌───▼──────────┐  ┌────────▼────────┐
-│  WebSocket Hub │ │Message Queue │  │  MCP Agent Pool │
-│   (Real-time)  │ │  (RabbitMQ)  │  │ (LLM Pipeline)  │
-└────────────────┘ └───┬──────────┘  └────────┬────────┘
-                       │                      │
-        ┌──────────────┼──────────────────────┘
-        │              │
-┌───────▼──────┐ ┌─────▼────────┐ ┌──────────────┐
-│  PostgreSQL  │ │    Redis     │ │  TimescaleDB │
-│  (Primary)   │ │   (Cache)    │ │  (Analytics) │
-└──────────────┘ └──────────────┘ └──────────────┘
+        ┌───────────────┴───────────────────────┐
+        │                                       │
+┌───────▼────────┐              ┌───────────────▼──────────────┐
+│  WebSocket Hub │              │   FAQ Agent Worker Pool      │
+│   (Real-time)  │              │  ┌─────────────────────────┐ │
+└───────┬────────┘              │  │ Aggregation Agent       │ │
+        │                       │  │ LLM Processing Agent    │ │
+        │                       │  │ Answer Generation Agent │ │
+        │                       │  │ Knowledge Gap Agent     │ │
+        │                       │  └─────────────────────────┘ │
+        │                       └──────────┬───────────────────┘
+        │                                  │
+        └──────────────┬───────────────────┘
+                       │
+        ┌──────────────┼──────────────────────────┐
+        │              │                          │
+┌───────▼──────┐ ┌─────▼────────┐  ┌─────────────▼────────────┐
+│ Message Queue│ │  PostgreSQL  │  │    Llama Stack           │
+│  (RabbitMQ)  │ │  + pgvector  │  │  ┌────────────────────┐  │
+│              │ │  + TimescaleDB│  │  │ vLLM (Qwen/Llama) │  │
+└──────────────┘ └─────┬────────┘  │  │ Llama Guard 3     │  │
+                       │           │  │ RAG Engine        │  │
+                ┌──────▼──────┐    │  │ Memory/Context    │  │
+                │    Redis    │    │  └────────────────────┘  │
+                │   (Cache)   │    └──────────────────────────┘
+                └─────────────┘
 ```
 
-### 2.2 Agentic/MCP Architecture
+### 2.2 FAQ Agent Architecture
 
-The platform implements a Model-Context-Protocol (MCP) inspired architecture with autonomous agent services:
+The FAQ answering system uses a **worker pool of specialized agents** that coordinate via RabbitMQ and integrate with Llama Stack for AI capabilities.
 
-#### 2.2.1 Agent Services
+#### 2.2.1 Agent Services Overview
 
-1. **FAQ Aggregation Agent**
-   - Batches incoming questions every 30-60 seconds
-   - Clusters similar questions using embedding similarity
-   - Generates master questions representing common themes
+**FAQ Agent Worker Pool** is a Node.js/TypeScript service that runs multiple concurrent workers, each executing one of four specialized agent types. These agents communicate via RabbitMQ message queues and leverage Llama Stack for LLM operations.
 
-2. **LLM Processing Agent**
-   - Manages vLLM inference requests (Qwen2.5, Llama-3.1)
-   - Implements retry logic and fallback between models
-   - Handles response streaming and token management
+```
+FAQ Service (API) → Publishes to RabbitMQ
+                    ↓
+    ┌───────────────┴───────────────┐
+    │   FAQ Agent Worker Pool       │
+    │  (Multiple Pods/Replicas)     │
+    │                               │
+    │  Workers consume from queues: │
+    │  - faq.aggregate.queue        │
+    │  - faq.llm.queue             │
+    │  - faq.answer.queue          │
+    │  - faq.analysis.queue        │
+    └───────────────┬───────────────┘
+                    ↓
+            Llama Stack API
+         (Inference + RAG + Safety)
+```
 
-3. **Answer Generation Agent**
-   - Formulates pedagogically appropriate answers
-   - Maintains context from lecture materials
-   - Applies content filters and academic tone
+#### 2.2.2 Agent Responsibilities
 
-4. **Knowledge Gap Analysis Agent**
-   - Tracks recurring question patterns across sessions
-   - Identifies curriculum weak points
-   - Generates insights for instructors
+**1. FAQ Aggregation Agent**
+- **Trigger**: Scheduled cron (every 30-60 seconds) or event-based
+- **Process**:
+  1. Fetches new unprocessed FAQ questions from PostgreSQL
+  2. Calls Embedding Service to generate embeddings for each question
+  3. Performs vector similarity search in pgvector to find similar questions
+  4. Clusters questions with cosine similarity > 0.85
+  5. Selects representative "master question" for each cluster
+  6. Publishes `faq.cluster.created` event to RabbitMQ
+- **Output**: Master questions ready for answer generation
+- **No direct Llama Stack usage** (uses separate embedding service)
 
-#### 2.2.2 Message-Driven Communication
+**2. LLM Processing Agent**
+- **Trigger**: Consumes `faq.cluster.created` messages from RabbitMQ
+- **Process**:
+  1. Receives master question and cluster metadata
+  2. Calls **Llama Stack Inference API** with:
+     - Model: Qwen2.5-14B-Instruct (primary) or Llama-3.1-8B (fallback)
+     - RAG enabled: retrieves relevant course documents from pgvector
+     - Safety enabled: Llama Guard 3 filters inputs/outputs
+  3. Implements retry logic (3 attempts with exponential backoff)
+  4. Falls back to Llama-3.1-8B if Qwen fails
+  5. Streams response tokens as they're generated
+- **Output**: Raw LLM-generated answer text
+- **Llama Stack API Used**: `inference.chatCompletion()` with RAG + Safety
+
+**3. Answer Generation Agent**
+- **Trigger**: Receives raw LLM answer from LLM Processing Agent
+- **Process**:
+  1. Post-processes LLM output for pedagogical quality
+  2. Extracts citations from RAG-retrieved documents
+  3. Formats answer with proper structure (introduction, body, citations)
+  4. Applies additional content filters (profanity, inappropriate content)
+  5. Validates answer length (50-2000 chars)
+  6. Stores in `faq_master_questions` table with `is_published=false`
+  7. Publishes `faq.answer.generated` event to WebSocket Hub
+- **Output**: Polished, citation-formatted answer ready for host review
+- **Llama Stack API Used**: None (post-processing only)
+
+**4. Knowledge Gap Analysis Agent**
+- **Trigger**: End of session or scheduled batch (nightly)
+- **Process**:
+  1. Analyzes all FAQ questions from session or time period
+  2. Identifies recurring topics using embedding clustering
+  3. Calls **Llama Stack Memory API** to track historical patterns
+  4. Compares current session themes vs. historical data (TimescaleDB)
+  5. Generates insights: "20% of questions about Recursion vs. 5% historically"
+  6. Stores insights in `session_archives` and TimescaleDB
+- **Output**: Knowledge gap report for instructor dashboard
+- **Llama Stack API Used**: `memory.query()` for historical context
+
+#### 2.2.3 FAQ Processing Flow (Complete Sequence)
+
+```
+Student → FAQ Question Submission
+    │
+    ▼
+[FAQ Service]
+    │ Validates & stores question in PostgreSQL (faq_questions table)
+    │ Publishes: faq.question.submitted → RabbitMQ
+    │ Returns: 202 Accepted to student
+    │
+    ▼ (Every 30-60s)
+[Aggregation Agent Worker]
+    │ 1. Fetches unprocessed questions from DB
+    │ 2. Calls Embedding Service → generates embeddings
+    │ 3. Vector search in pgvector (cosine similarity)
+    │ 4. Clusters similar questions (similarity > 0.85)
+    │ 5. Selects master question per cluster
+    │ 6. Publishes: faq.cluster.created → RabbitMQ
+    │
+    ▼
+[LLM Processing Agent Worker]
+    │ 1. Consumes faq.cluster.created message
+    │ 2. Prepares RAG context: quiz_set_id → retrieves relevant docs
+    │ 3. Calls Llama Stack API:
+    │    POST /inference/chat-completion
+    │    {
+    │      "model": "Qwen/Qwen2.5-14B-Instruct",
+    │      "messages": [...],
+    │      "rag": { "enabled": true, "vector_db_ids": [...], "top_k": 5 },
+    │      "safety": { "enabled": true, "shield": "llama-guard-3" }
+    │    }
+    │ 4. Llama Stack internally:
+    │    - Retrieves top-5 document chunks from pgvector
+    │    - Runs Llama Guard 3 on input
+    │    - Calls vLLM inference with RAG context
+    │    - Runs Llama Guard 3 on output
+    │ 5. Receives answer with citations
+    │ 6. Publishes: faq.llm.completed → RabbitMQ (with raw answer)
+    │
+    ▼
+[Answer Generation Agent Worker]
+    │ 1. Consumes faq.llm.completed message
+    │ 2. Post-processes answer:
+    │    - Formats citations as footnotes
+    │    - Validates length & quality
+    │    - Checks for profanity (additional layer)
+    │ 3. Stores in faq_master_questions (is_published = false)
+    │ 4. Publishes: faq.answer.generated → WebSocket Hub
+    │
+    ▼
+[WebSocket Hub] → Broadcasts to Host UI
+    │ Host sees: "New FAQ answer ready for review"
+    │ Host reviews, edits if needed, clicks "Publish"
+    │
+    ▼
+[FAQ Service] → Updates is_published = true
+    │ Publishes: faq.published → WebSocket Hub
+    │
+    ▼
+[WebSocket Hub] → Broadcasts to all Students in session
+    │ Students see answer appear in real-time
+    │
+    ▼ (End of session or nightly)
+[Knowledge Gap Analysis Agent Worker]
+    │ 1. Analyzes session FAQ patterns
+    │ 2. Calls Llama Stack Memory API for historical context
+    │ 3. Generates insights report
+    │ 4. Stores in session_archives & TimescaleDB
+```
+
+#### 2.2.4 Key Integration Points
+
+**How Agents Use Llama Stack:**
+
+1. **Aggregation Agent** → ❌ No Llama Stack (uses separate Embedding Service)
+2. **LLM Processing Agent** → ✅ **Primary Llama Stack user**
+   - Calls: `inference.chatCompletion()` with RAG + Safety
+   - Leverages: vLLM (Qwen/Llama), Llama Guard 3, pgvector retrieval
+3. **Answer Generation Agent** → ❌ No Llama Stack (post-processing only)
+4. **Knowledge Gap Agent** → ✅ Uses `memory.query()` for historical context
+
+**Why This Architecture:**
+- **Separation of Concerns**: Each agent has a single, well-defined responsibility
+- **Scalability**: Agents can scale independently based on queue depth
+- **Fault Tolerance**: If LLM Processing Agent fails, questions remain in queue for retry
+- **RAG Context**: Llama Stack automatically retrieves course materials without manual vector search in agent code
+- **Safety**: Llama Guard 3 integrated at Llama Stack level, not agent level
+- **Observability**: Each agent can be monitored separately (queue depth, processing time, error rate)
+
+#### 2.2.5 Message-Driven Communication
 
 - **Message Broker:** RabbitMQ with topic exchanges
 - **Message Patterns:**
@@ -111,9 +268,204 @@ session.question.submitted
 quiz.answer.submitted
 poll.vote.submitted
 faq.question.submitted
-faq.master.generated
-faq.answer.generated
+faq.cluster.created         # New: triggers LLM processing
+faq.llm.completed           # New: triggers answer generation
+faq.answer.generated        # Sent to WebSocket Hub
+faq.published               # Final broadcast to students
 analytics.event
+```
+
+### 2.3 Core Service Responsibilities
+
+The platform consists of specialized microservices, each with distinct responsibilities:
+
+#### 2.3.1 Session Service
+
+**Purpose**: Manages the lifecycle of live quiz/poll/FAQ sessions
+
+**Responsibilities**:
+- Create, start, pause, resume, and end sessions
+- Generate unique session PINs (6-8 character codes)
+- Track session state (waiting, active, paused, completed)
+- Manage current question progression
+- Track participant count in real-time
+- Handle session settings (randomize answers, show leaderboard, etc.)
+- Coordinate with WebSocket Hub for real-time updates
+
+**Key Operations**:
+- `POST /api/v1/sessions` - Create new session
+- `POST /api/v1/sessions/:id/start` - Begin session
+- `POST /api/v1/sessions/:id/next-question` - Advance to next question
+- `POST /api/v1/sessions/:id/end` - End session and trigger archival
+
+**Data**: Works with `sessions`, `participants` tables
+
+---
+
+#### 2.3.2 Auth Service
+
+**Purpose**: Authentication and authorization for hosts and admins
+
+**Responsibilities**:
+- OIDC authentication (university SSO integration)
+- JWT token issuance and validation
+- Refresh token management
+- User session management
+- Role-based access control (RBAC)
+- Integration with OpenShift OAuth (fallback)
+
+**Key Operations**:
+- `POST /api/v1/auth/login` - Initiate OIDC login
+- `GET /api/v1/auth/oidc/callback` - Handle OIDC redirect
+- `POST /api/v1/auth/refresh` - Refresh access token
+- `GET /api/v1/auth/me` - Get current user info
+
+**Data**: Works with `users` table
+
+**Note**: Participants do NOT use this service (they join via PIN only)
+
+---
+
+#### 2.3.3 Quiz Service
+
+**Purpose**: Quiz set creation, management, and RAG document handling
+
+**Responsibilities**:
+- CRUD operations for quiz sets
+- CRUD operations for questions (multiple choice, true/false, type answer, etc.)
+- Quiz duplication/cloning
+- Question reordering
+- **RAG document upload and management**
+  - Accept lecture slides, PDFs, notes
+  - Chunk documents (512 tokens with 50 token overlap)
+  - Generate embeddings via Embedding Service
+  - Store in `rag_documents` and `rag_document_chunks` tables
+- Quiz export (JSON format)
+
+**Key Operations**:
+- `POST /api/v1/quizzes` - Create quiz set
+- `POST /api/v1/quizzes/:id/questions` - Add question
+- `POST /api/v1/quizzes/:id/documents` - Upload RAG document
+- `GET /api/v1/quizzes/:id/export` - Export quiz
+
+**Data**: Works with `quiz_sets`, `questions`, `rag_documents`, `rag_document_chunks` tables
+
+---
+
+#### 2.3.4 Poll Service
+
+**Purpose**: Real-time polling and sentiment checks
+
+**Responsibilities**:
+- Handle poll-type questions (sentiment, word cloud, slider)
+- Collect participant votes in real-time
+- Aggregate poll results
+- Publish live results to WebSocket Hub for visualization
+- No "correct" answers (unlike quiz questions)
+
+**Key Operations**:
+- Vote collection via WebSocket events
+- Real-time aggregation
+- Result broadcasting
+
+**Data**: Works with `responses` table (with `is_correct` = NULL for polls)
+
+---
+
+#### 2.3.5 FAQ Service
+
+**Purpose**: Student question submission and host moderation
+
+**Responsibilities**:
+- Accept FAQ questions from participants
+- Store questions in `faq_questions` table
+- Trigger FAQ processing pipeline (publishes to RabbitMQ)
+- Provide host interface for reviewing generated answers
+- Publish/unpublish FAQ answers
+- Voting on FAQ answers (upvote/downvote)
+
+**Key Operations**:
+- `POST /api/v1/sessions/:id/faq/submit` (via WebSocket) - Student submits question
+- `GET /api/v1/sessions/:id/faq/masters` - Get master questions with answers
+- `PUT /api/v1/sessions/:id/faq/masters/:mid` - Edit answer
+- `POST /api/v1/sessions/:id/faq/masters/:mid/publish` - Publish answer
+
+**Data**: Works with `faq_questions`, `faq_master_questions` tables
+
+**Note**: Does NOT perform LLM processing - that's handled by FAQ Agent Worker Pool
+
+---
+
+#### 2.3.6 Analytics Service
+
+**Purpose**: Session analytics, performance metrics, and knowledge gap insights
+
+**Responsibilities**:
+- Calculate session statistics (participation rate, avg response time, correct answer rate)
+- Generate leaderboards
+- Question difficulty analysis
+- Cross-session knowledge gap analysis
+- Export session results (JSON, CSV)
+- Time-series metrics storage (TimescaleDB)
+
+**Key Operations**:
+- `GET /api/v1/analytics/sessions/:id` - Session performance report
+- `GET /api/v1/analytics/questions/:id` - Question difficulty & distribution
+- `GET /api/v1/analytics/knowledge-gaps` - Curriculum weak points across sessions
+- `GET /api/v1/sessions/:id/export` - Download session data
+
+**Data**: Works with `responses`, `participants`, `session_archives`, `session_metrics` (TimescaleDB)
+
+**Implementation**: Go 1.21 for high-performance analytics processing
+
+---
+
+#### 2.3.7 WebSocket Hub
+
+**Purpose**: Real-time bidirectional communication between hosts and participants
+
+**Responsibilities**:
+- Maintain persistent WebSocket connections for hosts and participants
+- Broadcast session events (question shown, answer received, leaderboard update)
+- Room-based communication (one room per session)
+- Sticky sessions via Redis pub/sub (for multi-pod deployment)
+- Connection management (heartbeat, reconnection)
+
+**Key Events**:
+- Host → Participants: `question:show`, `question:closed`, `leaderboard:update`, `faq:published`
+- Participant → Host: `answer:submit`, `faq:submit`
+- Host → Server: `session:start`, `question:show`, `question:close`
+
+**Technology**: Socket.io with Redis adapter for horizontal scaling
+
+---
+
+### 2.4 Service Communication Patterns
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Communication Flow                       │
+└─────────────────────────────────────────────────────────────┘
+
+Frontend (Host) ──REST──> Auth Service ──JWT──> Other Services
+                           │
+Frontend (Host) ──REST──> Quiz Service ──DB──> PostgreSQL
+                           │
+                           └──Embedding Service──> rag_documents
+
+Frontend (Host) ──REST──> Session Service ──Redis──> Session State
+                           │
+                           └──WebSocket Hub──> Participants
+
+Participants ──WebSocket──> WebSocket Hub ──RabbitMQ──> FAQ Service
+                                   │
+                                   └──DB──> faq_questions
+
+FAQ Service ──RabbitMQ──> FAQ Agent Worker Pool ──Llama Stack──> Answers
+                                   │
+                                   └──WebSocket Hub──> Host/Participants
+
+Session End ──Trigger──> Analytics Service ──TimescaleDB──> Metrics
 ```
 
 ---
