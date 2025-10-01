@@ -431,7 +431,7 @@ faq:answer:generated   // New FAQ answer ready for review
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Communication Flow                       │
+│                     Communication Flow                      │
 └─────────────────────────────────────────────────────────────┘
 
 Frontend ──HTTP/REST──> API Service ──PostgreSQL──> All Tables
