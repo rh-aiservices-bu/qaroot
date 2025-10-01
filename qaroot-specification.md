@@ -27,8 +27,8 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                Load Balancer (OpenShift Router)                  │
-└────────────────────────────┬─────────────────────────────────────┘
+│                Load Balancer (OpenShift Router)                 │
+└────────────────────────────┬────────────────────────────────────┘
                              │
         ┌────────────────────┴────────────────────┐
         │                                         │
@@ -51,32 +51,32 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
                          │
         ┌────────────────┼────────────────────────┐
         │                │                        │
-┌───────▼──────────┐ ┌───▼──────────────┐ ┌──────▼────────────────┐
-│ WebSocket Service│ │ FAQ Worker Pool  │ │    Llama Stack        │
-│  (Real-time)     │ │ ┌──────────────┐ │ │ ┌──────────────────┐ │
-│                  │ │ │ Aggregation  │ │ │ │ vLLM Inference   │ │
-│ - Quiz/Poll      │ │ │ LLM Process  │ │ │ │ Llama Guard 3    │ │
-│ - FAQ            │ │ │ Answer Gen   │ │ │ │ RAG Engine       │ │
-│ - Leaderboard    │ │ │ Analysis     │ │ │ │ Memory/Context   │ │
-│                  │ │ └──────────────┘ │ │ └──────────────────┘ │
-└───────┬──────────┘ └───┬──────────────┘ └───────────────────────┘
-        │                │
-        └────────────────┼────────────────────┐
-                         │                    │
-        ┌────────────────┼────────────────────┼──────────┐
-        │                │                    │          │
-┌───────▼──────┐  ┌──────▼─────────┐  ┌──────▼──────┐  │
-│ Red Hat AMQ  │  │  PostgreSQL    │  │  Redis      │  │
-│  (Queues)    │  │  + pgvector    │  │  (Cache/    │  │
-└──────────────┘  │  + TimescaleDB │  │   Sessions) │  │
-                  └────────────────┘  └─────────────┘  │
-                                                        │
-                  ┌─────────────────────────────────────┘
-                  │
-          ┌───────▼──────────┐
-          │ Embedding Service│
-          │ (nomic-embed)    │
-          └──────────────────┘
+┌───────▼──────────┐ ┌───▼──────────────┐ ┌──────▼─────────────┐
+│ WebSocket Service│ │ FAQ Worker Pool  │ │   Llama Stack      │
+│  (Real-time)     │ │ ┌──────────────┐ │ │ ┌────────────────┐ │
+│                  │ │ │ Aggregation  │ │ │ │ Orchestration  │ │
+│ - Quiz/Poll      │ │ │ LLM Process  │ │ │ │ RAG Engine     │ │
+│ - FAQ            │ │ │ Answer Gen   │ │ │ │ Embeddings     │ │
+│ - Leaderboard    │ │ │ Analysis     │ │ │ │ Memory         │ │
+│                  │ │ └──────────────┘ │ │ └────────────────┘ │
+└───────┬──────────┘ └───┬──────────────┘ └──────────┬─────────┘
+        │                │                           │
+        │                │            ┌──────────────┴───────────────┐
+        │                │            │                              │
+        └────────────────┼────────────┼──────────────────────────────┼───┐
+                         │            │                              │   │
+        ┌────────────────┼────────────┼───┐   ┌──────────────────────▼───▼──┐
+        │                │            │   │   │   vLLM Services (Separate)  │
+┌───────▼──────┐  ┌──────▼─────────┐  │   │   │ ┌───────────────────────┐   │
+│ Red Hat AMQ  │  │  PostgreSQL    │  │   │   │ │ vLLM: Qwen 14B (×2)   │   │
+│  (Queues)    │  │  + pgvector    │  │   │   │ │ vLLM: Guard 3 (×2)    │   │
+└──────────────┘  │  + TimescaleDB │  │   │   │ └───────────────────────┘   │
+                  └────────────────┘  │   │   └─────────────────────────────┘
+                              ┌───────▼───▼──┐
+                              │    Redis     │
+                              │  (Cache/     │
+                              │   Sessions)  │
+                              └──────────────┘
 ```
 
 ### 2.2 FAQ Agent Architecture
@@ -111,41 +111,45 @@ FAQ Service (API) → Publishes to Red Hat AMQ
 - **Trigger**: Scheduled cron (every 30-60 seconds) or event-based
 - **Process**:
   1. Fetches new unprocessed FAQ questions from PostgreSQL
-  2. Calls Embedding Service to generate embeddings for each question
-  3. Performs vector similarity search in pgvector to find similar questions
-  4. Clusters questions with cosine similarity > 0.85
-  5. Selects representative "master question" for each cluster
-  6. Publishes `faq.cluster.created` event to Red Hat AMQ
+  2. Calls **Llama Stack Embeddings API** to generate embeddings for each question
+  3. Stores embeddings in pgvector (faq_questions.embedding column)
+  4. Performs vector similarity search in pgvector to find similar questions
+  5. Clusters questions with cosine similarity > 0.85
+  6. Selects representative "master question" for each cluster
+  7. Publishes `faq.cluster.created` event to Red Hat AMQ
 - **Output**: Master questions ready for answer generation
-- **No direct Llama Stack usage** (uses separate embedding service)
+- **Llama Stack API Used**: `embeddings.create()` for question embeddings
 
 **2. LLM Processing Agent**
 - **Trigger**: Consumes `faq.cluster.created` messages from Red Hat AMQ
 - **Process**:
   1. Receives master question and cluster metadata
   2. Calls **Llama Stack Inference API** with:
-     - Model: Qwen2.5-14B-Instruct (primary) or Llama-3.1-8B (fallback)
+     - Model: Qwen2.5-14B-Instruct (via vLLM)
      - RAG enabled: retrieves relevant course documents from pgvector
-     - Safety enabled: Llama Guard 3 filters inputs/outputs
+     - Safety enabled: Llama Guard 3 filters inputs/outputs (via vLLM)
   3. Implements retry logic (3 attempts with exponential backoff)
-  4. Falls back to Llama-3.1-8B if Qwen fails
-  5. Streams response tokens as they're generated
-  6. Publishes `faq.llm.completed` to Red Hat AMQ (with raw answer)
+  4. Streams response tokens as they're generated
+  5. Publishes `faq.llm.completed` to Red Hat AMQ (with raw answer)
 - **Output**: Raw LLM-generated answer text
 - **Llama Stack API Used**: `inference.chatCompletion()` with RAG + Safety
+- **Note**: Llama Stack routes requests to separate vLLM services
 
 **3. Answer Generation Agent**
 - **Trigger**: Receives raw LLM answer from LLM Processing Agent
 - **Process**:
   1. Post-processes LLM output for pedagogical quality
   2. Extracts citations from RAG-retrieved documents
-  3. Formats answer with proper structure (introduction, body, citations)
-  4. Applies additional content filters (profanity, inappropriate content)
+  3. **Optional**: Calls **Llama Stack Inference API** for answer refinement:
+     - Reformat citations to academic style
+     - Add executive summary if answer is long
+     - Simplify complex language for student comprehension
+  4. Applies additional content filters (profanity check)
   5. Validates answer length (50-2000 chars)
   6. Stores in `faq_master_questions` table with `is_published=false`
   7. Publishes `faq.answer.generated` event to WebSocket Hub
 - **Output**: Polished, citation-formatted answer ready for host review
-- **Llama Stack API Used**: None (post-processing only)
+- **Llama Stack API Used**: Optionally `inference.chatCompletion()` for post-processing refinement
 
 **4. Knowledge Gap Analysis Agent**
 - **Trigger**: End of session or scheduled batch (nightly)
@@ -173,11 +177,14 @@ Student → FAQ Question Submission
     ▼ (Every 30-60s)
 [Aggregation Agent Worker]
     │ 1. Fetches unprocessed questions from DB
-    │ 2. Calls Embedding Service → generates embeddings
-    │ 3. Vector search in pgvector (cosine similarity)
-    │ 4. Clusters similar questions (similarity > 0.85)
-    │ 5. Selects master question per cluster
-    │ 6. Publishes: faq.cluster.created → Red Hat AMQ
+    │ 2. Calls Llama Stack Embeddings API:
+    │    POST /embeddings/create
+    │    { "model": "nomic-embed-text-v1.5", "input": [...questions] }
+    │ 3. Stores embeddings in pgvector
+    │ 4. Vector search in pgvector (cosine similarity)
+    │ 5. Clusters similar questions (similarity > 0.85)
+    │ 6. Selects master question per cluster
+    │ 7. Publishes: faq.cluster.created → Red Hat AMQ
     │
     ▼
 [LLM Processing Agent Worker]
@@ -234,11 +241,11 @@ Student → FAQ Question Submission
 
 **How Agents Use Llama Stack:**
 
-1. **Aggregation Agent** → ❌ No Llama Stack (uses separate Embedding Service)
+1. **Aggregation Agent** → ✅ Uses `embeddings.create()` for question embeddings
 2. **LLM Processing Agent** → ✅ **Primary Llama Stack user**
    - Calls: `inference.chatCompletion()` with RAG + Safety
-   - Leverages: vLLM (Qwen/Llama), Llama Guard 3, pgvector retrieval
-3. **Answer Generation Agent** → ❌ No Llama Stack (post-processing only)
+   - Llama Stack routes to: vLLM (Qwen 14B) and vLLM (Llama Guard 3)
+3. **Answer Generation Agent** → ✅ Optionally uses `inference.chatCompletion()` for answer refinement
 4. **Knowledge Gap Agent** → ✅ Uses `memory.query()` for historical context
 
 **Why This Architecture:**
@@ -412,8 +419,10 @@ faq:answer:generated   // New FAQ answer ready for review
 
 **Integration**:
 - Consumes from Red Hat AMQ queues
-- Calls Llama Stack API
-- Calls Embedding Service
+- Calls Llama Stack APIs:
+  - `embeddings.create()` for question clustering
+  - `inference.chatCompletion()` for answer generation
+  - `memory.query()` for historical analysis
 - Publishes results to Red Hat AMQ → WebSocket Service
 
 ---
@@ -428,8 +437,8 @@ faq:answer:generated   // New FAQ answer ready for review
 Frontend ──HTTP/REST──> API Service ──PostgreSQL──> All Tables
                          │           └──Redis──> Session Cache
                          │
-                         └──triggers──> Embedding Service
-                                       (for RAG docs)
+                         └──triggers──> Llama Stack Embeddings API
+                                       (for RAG doc chunking)
 
 Frontend ──WebSocket──> WebSocket Service ──Redis Pub/Sub──> Other pods
                          │                └──Red Hat AMQ──> FAQ Workers
@@ -437,8 +446,10 @@ Frontend ──WebSocket──> WebSocket Service ──Redis Pub/Sub──> Oth
                          └──broadcasts──> All connected clients
 
 FAQ Workers ──consume──> Red Hat AMQ
-            └──call──> Llama Stack (Inference + RAG + Safety)
-            └──call──> Embedding Service (clustering)
+            └──call──> Llama Stack:
+                       - Embeddings API (clustering)
+                       - Inference API (RAG + Safety)
+                       - Memory API (historical context)
             └──publish──> Red Hat AMQ ──> WebSocket Service
 ```
 
@@ -744,14 +755,13 @@ The Host Interface is a React-based web application used by professors and teach
 
 | Component | Technology | Justification |
 |-----------|-----------|---------------|
-| LLM Stack Framework | Llama Stack | Unified API for inference, RAG, guardrails, and safety |
-| Model Serving | vLLM (via Llama Stack) | High-throughput inference, managed by Llama Stack |
+| LLM Stack Framework | Llama Stack | Unified API for inference, embeddings, RAG, safety |
+| Model Serving | vLLM (separate services) | High-throughput inference, independent scaling |
 | Primary LLM | Qwen2.5-14B-Instruct | Best for instruction-following, multilingual support |
-| Alternative LLM | Llama-3.1-8B-Instruct | Faster inference, good quality/speed balance |
-| Embeddings | nomic-embed-text-v1.5 (768d) | Open-source, efficient, good clustering performance |
+| Embeddings | nomic-embed-text-v1.5 (768d) via Llama Stack | Integrated in Llama Stack, no separate service needed |
 | Vector Store | pgvector (PostgreSQL) | RAG document store, simplicity, integration |
 | RAG Framework | Llama Stack RAG | Native RAG support with lecture materials context |
-| Safety Layer | Llama Guard 3 | Content moderation, prompt injection protection |
+| Safety Layer | Llama Guard 3 (via vLLM) | Content moderation, prompt injection protection |
 
 #### 3.5.1 Model Selection Rationale
 
@@ -759,14 +769,13 @@ The Host Interface is a React-based web application used by professors and teach
 - **Best for pedagogical tasks**: Superior instruction-following and reasoning capabilities
 - **Multilingual support**: Native support for English, Chinese, and other languages (important for diverse student populations)
 - **Context length**: 32K tokens (adequate for FAQ context with lecture materials)
-- **Performance**: Outperforms Llama-3.1-8B on academic Q&A benchmarks
-- **VRAM requirement**: ~28GB with 4-bit quantization, fits on single A100 40GB
+- **Performance**: State-of-the-art results on academic Q&A benchmarks
+- **VRAM requirement**: ~28GB in FP16, fits on single A100 40GB
 
-**Fallback Model: Llama-3.1-8B-Instruct**
-- **Speed**: 2-3x faster inference than 14B models
-- **Lower latency**: Critical for real-time FAQ generation during active sessions
-- **Resource efficiency**: Runs on ~16GB VRAM, better for high-concurrency scenarios
-- **Quality**: Still produces pedagogically sound answers for most questions
+**Safety Model: Llama Guard 3-8B**
+- **Content moderation**: 13 safety categories for filtering harmful content
+- **Speed**: Fast inference (~50ms per check) for real-time safety
+- **VRAM requirement**: ~16GB in FP16, fits on L4 or T4 GPUs
 
 **Embedding Model: nomic-embed-text-v1.5**
 - **Dimensionality**: 768 dimensions (good balance of accuracy and storage)
@@ -2091,7 +2100,156 @@ spec:
     - build-image
 ```
 
-### 8.5 Llama Stack Deployment
+### 8.5 vLLM and Llama Stack Deployment
+
+The architecture uses **separate vLLM deployments** for each model, with Llama Stack orchestrating them.
+
+#### 8.5.1 vLLM Deployment for Qwen2.5-14B (Primary Model)
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-qwen-14b
+  namespace: qaroot-production
+spec:
+  replicas: 2  # For HA
+  selector:
+    matchLabels:
+      app: vllm-qwen
+  template:
+    metadata:
+      labels:
+        app: vllm-qwen
+    spec:
+      nodeSelector:
+        nvidia.com/gpu: "true"
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        args:
+        - --model
+        - Qwen/Qwen2.5-14B-Instruct
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "8192"
+        - --gpu-memory-utilization
+        - "0.90"
+        - --port
+        - "8000"
+        - --trust-remote-code
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: 32Gi
+            cpu: 4
+          limits:
+            nvidia.com/gpu: 1
+            memory: 48Gi
+            cpu: 8
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 300
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 300
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-qwen-service
+  namespace: qaroot-production
+spec:
+  selector:
+    app: vllm-qwen
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP
+```
+
+#### 8.5.2 vLLM Deployment for Llama Guard 3 (Safety)
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-llama-guard
+  namespace: qaroot-production
+spec:
+  replicas: 2  # Safety is critical
+  selector:
+    matchLabels:
+      app: vllm-guard
+  template:
+    metadata:
+      labels:
+        app: vllm-guard
+    spec:
+      nodeSelector:
+        nvidia.com/gpu: "true"
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        args:
+        - --model
+        - meta-llama/Llama-Guard-3-8B
+        - --tensor-parallel-size
+        - "1"
+        - --max-model-len
+        - "4096"
+        - --gpu-memory-utilization
+        - "0.70"
+        - --port
+        - "8000"
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: 18Gi
+            cpu: 2
+          limits:
+            nvidia.com/gpu: 1
+            memory: 24Gi
+            cpu: 4
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 200
+          periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-guard-service
+  namespace: qaroot-production
+spec:
+  selector:
+    app: vllm-guard
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP
+```
+
+#### 8.5.3 Llama Stack Orchestration Layer
+
+Llama Stack connects to the separate vLLM services and provides a unified API.
 
 ```yaml
 apiVersion: v1
@@ -2103,34 +2261,46 @@ data:
   config.yaml: |
     version: 2
 
+    # Inference: Connect to remote vLLM service for Qwen
     inference:
-      provider: vllm
-      vllm:
-        - model: Qwen/Qwen2.5-14B-Instruct
-          max_tokens: 8192
-          gpu_memory_utilization: 0.90
-        - model: meta-llama/Llama-3.1-8B-Instruct
-          max_tokens: 8192
-          gpu_memory_utilization: 0.85
+      provider: remote::vllm
+      config:
+        url: http://vllm-qwen-service:8000/v1
+        api_token: null
 
+    # Embeddings: Run internally in Llama Stack
+    embeddings:
+      provider: sentence-transformers
+      config:
+        model: nomic-ai/nomic-embed-text-v1.5
+        dimension: 768
+        max_batch_size: 32
+
+    # Safety: Connect to remote vLLM service for Llama Guard
     safety:
-      provider: llama-guard
-      model: meta-llama/Llama-Guard-3-8B
+      provider: remote::vllm
+      config:
+        url: http://vllm-guard-service:8000/v1
+        api_token: null
 
+    # Memory: Store in PostgreSQL
     memory:
       provider: postgres
-      postgres:
+      config:
         host: postgres-service
+        port: 5432
         database: qaroot
 
+    # Vector DB: Use pgvector for RAG
     vector_db:
       provider: pgvector
-      pgvector:
+      config:
         host: postgres-service
+        port: 5432
         database: qaroot
 
+    # RAG Retrieval settings
     retrieval:
-      provider: faiss
       chunk_size: 512
       chunk_overlap: 50
       top_k: 5
@@ -2150,8 +2320,6 @@ spec:
       labels:
         app: llama-stack
     spec:
-      nodeSelector:
-        nvidia.com/gpu: "true"
       containers:
       - name: llama-stack
         image: llamastack/distribution:latest
@@ -2167,8 +2335,6 @@ spec:
         volumeMounts:
         - name: config
           mountPath: /config
-        - name: models
-          mountPath: /models
         env:
         - name: DATABASE_URL
           valueFrom:
@@ -2177,13 +2343,11 @@ spec:
               key: connection-string
         resources:
           requests:
-            nvidia.com/gpu: 1
-            memory: 40Gi
-            cpu: 6
+            memory: 8Gi
+            cpu: 4
           limits:
-            nvidia.com/gpu: 1
-            memory: 64Gi
-            cpu: 12
+            memory: 16Gi
+            cpu: 8
         livenessProbe:
           httpGet:
             path: /health
@@ -2200,22 +2364,6 @@ spec:
       - name: config
         configMap:
           name: llama-stack-config
-      - name: models
-        persistentVolumeClaim:
-          claimName: llama-stack-models
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: llama-stack-models
-  namespace: qaroot-production
-spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 100Gi
-  storageClassName: gp3-csi
 ---
 apiVersion: v1
 kind: Service
@@ -2230,58 +2378,49 @@ spec:
     port: 5000
     targetPort: 5000
   type: ClusterIP
----
-# Embedding service deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: embedding-service
-  namespace: qaroot-production
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: embedding-service
-  template:
-    metadata:
-      labels:
-        app: embedding-service
-    spec:
-      containers:
-      - name: embedding
-        image: ghcr.io/huggingface/text-embeddings-inference:1.2
-        args:
-        - --model-id
-        - nomic-ai/nomic-embed-text-v1.5
-        - --port
-        - "8000"
-        - --max-batch-tokens
-        - "16384"
-        ports:
-        - containerPort: 8000
-          name: http
-        resources:
-          requests:
-            memory: 4Gi
-            cpu: 2
-          limits:
-            memory: 8Gi
-            cpu: 4
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: embedding-service
-  namespace: qaroot-production
-spec:
-  selector:
-    app: embedding-service
-  ports:
-  - name: http
-    port: 8000
-    targetPort: 8000
-  type: ClusterIP
+
+# Note: Embeddings are now handled by Llama Stack (sentence-transformers provider)
+# No separate embedding service deployment needed
 ```
+
+#### 8.5.4 Deployment Architecture Summary
+
+**Total GPU Requirements:**
+- **Qwen2.5-14B**: 2 replicas × 1 GPU = **2 GPUs** (A100 40GB or L40S recommended)
+- **Llama Guard 3**: 2 replicas × 1 GPU = **2 GPUs** (L4 or T4 acceptable)
+- **Total: 4 GPUs minimum** for production deployment
+
+**Architecture Benefits:**
+- ✅ **vLLM and Llama Stack are separate**: vLLM provides inference, Llama Stack orchestrates
+- ✅ **Independent scaling**: Scale vLLM inference pods without restarting Llama Stack
+- ✅ **High availability**: Qwen and Guard both have 2 replicas for redundancy
+- ✅ **Resource isolation**: Inference models don't compete for GPU memory
+- ✅ **Unified API**: Llama Stack provides single endpoint for all AI operations
+- ✅ **Safety always on**: Llama Guard has 2 replicas for critical safety filtering
+
+**Request Flow:**
+```
+Application
+    ↓
+Llama Stack API (http://llama-stack:5000)
+    ↓
+    ├──[Inference Request]──→ vllm-qwen-service:8000      (Qwen inference via OpenAI API)
+    ├──[Safety Check]───────→ vllm-guard-service:8000     (Llama Guard via OpenAI API)
+    ├──[Embeddings]─────────→ Internal (sentence-transformers in Llama Stack)
+    └──[RAG/Memory]─────────→ PostgreSQL + pgvector
+```
+
+**Key Architecture Points:**
+- vLLM services expose OpenAI-compatible APIs
+- Llama Stack connects to vLLM as remote providers
+- Embeddings run inside Llama Stack (no GPU needed)
+- RAG retrieval uses pgvector in PostgreSQL
+
+**Node Affinity Strategy:**
+- Use `nodeSelector: nvidia.com/gpu: "true"` to place vLLM pods on GPU nodes
+- Consider node taints/tolerations to dedicate nodes to specific models
+- Example: Dedicate 2 nodes with A100s for Qwen, 1 node with L4s for Guard
+- Llama Stack pods don't need GPUs (embeddings run on CPU)
 
 ---
 
@@ -2583,13 +2722,14 @@ OIDC_CLIENT_ID=qaroot-dev
 OIDC_CLIENT_SECRET=secret_here
 OIDC_REDIRECT_URI=http://localhost:3000/auth/callback
 
-# LLM Integration (Llama Stack)
+# LLM Integration (Llama Stack - connects to vLLM)
 LLAMA_STACK_API_BASE=http://llama-stack:5000
-LLAMA_STACK_PRIMARY_MODEL=Qwen/Qwen2.5-14B-Instruct
-LLAMA_STACK_FALLBACK_MODEL=meta-llama/Llama-3.1-8B-Instruct
-LLAMA_STACK_SAFETY_MODEL=meta-llama/Llama-Guard-3-8B
-EMBEDDING_API_BASE=http://embedding-service:8000
-EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
+LLAMA_STACK_MODEL=Qwen/Qwen2.5-14B-Instruct
+LLAMA_STACK_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
+
+# vLLM Services (for reference, accessed via Llama Stack)
+VLLM_QWEN_URL=http://vllm-qwen-service:8000/v1
+VLLM_GUARD_URL=http://vllm-guard-service:8000/v1
 
 # RAG Configuration
 RAG_CHUNK_SIZE=512
@@ -2754,10 +2894,10 @@ Security Tests:
 | Real-time | Socket.io | Native WebSocket, SSE | Fallbacks, Redis adapter |
 | Frontend | React | Vue, Svelte | Ecosystem, React Native reuse |
 | LLM Stack | Llama Stack | LangChain, LlamaIndex | Unified API: inference, RAG, safety, memory |
-| LLM Serving | vLLM (via Stack) | TGI, Ollama | Highest throughput, Stack-managed |
-| LLM Model | Qwen2.5-14B | Llama-3.1, Mistral, GPT-4 | Best instruction-following, multilingual |
-| Safety | Llama Guard 3 | OpenAI Moderation, Custom | Native Stack integration, 13 categories |
-| Embeddings | nomic-embed-text | BGE, E5, OpenAI | Open-source, efficient, 768d is adequate |
+| LLM Serving | vLLM (separate) | TGI, Ollama | Highest throughput, independent scaling |
+| LLM Model | Qwen2.5-14B | Llama-3.x, Mistral, GPT-4 | Best instruction-following, multilingual |
+| Safety | Llama Guard 3 | OpenAI Moderation, Custom | Native vLLM integration, 13 categories |
+| Embeddings | nomic-embed-text | BGE, E5, OpenAI | Open-source, efficient, runs in Stack |
 
 ### Appendix B: References
 
