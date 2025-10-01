@@ -27,61 +27,56 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Load Balancer (HAProxy)                       │
+│                Load Balancer (OpenShift Router)                  │
 └────────────────────────────┬─────────────────────────────────────┘
                              │
         ┌────────────────────┴────────────────────┐
         │                                         │
 ┌───────▼────────┐                       ┌───────▼────────┐
 │  Web Frontend  │                       │  Participant   │
-│   (Host UI)    │                       │  Mobile App    │
+│   (Host UI)    │                       │   Web App      │
 └───────┬────────┘                       └───────┬────────┘
         │                                        │
         └────────────────┬───────────────────────┘
                          │
-        ┌────────────────┼────────────────┐
-        │                │                │
-┌───────▼────────┐ ┌────▼─────┐ ┌───────▼────────┐
-│ Session Service│ │ Auth Svc │ │  Quiz Service  │
-│                │ │          │ │  + RAG Docs    │
-└───────┬────────┘ └────┬─────┘ └───────┬────────┘
-        │               │               │
-        └───────────────┼───────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-┌───────▼────────┐ ┌───▼──────┐ ┌──────▼─────────┐
-│  Poll Service  │ │FAQ Service│ │ Analytics Svc  │
-└───────┬────────┘ └────┬─────┘ └───────┬────────┘
-        │               │               │
-        └───────────────┼───────────────┘
-                        │
-        ┌───────────────┴───────────────────────┐
-        │                                       │
-┌───────▼────────┐              ┌───────────────▼──────────────┐
-│  WebSocket Hub │              │   FAQ Agent Worker Pool      │
-│   (Real-time)  │              │  ┌─────────────────────────┐ │
-└───────┬────────┘              │  │ Aggregation Agent       │ │
-        │                       │  │ LLM Processing Agent    │ │
-        │                       │  │ Answer Generation Agent │ │
-        │                       │  │ Knowledge Gap Agent     │ │
-        │                       │  └─────────────────────────┘ │
-        │                       └──────────┬───────────────────┘
-        │                                  │
-        └──────────────┬───────────────────┘
-                       │
-        ┌──────────────┼──────────────────────────┐
-        │              │                          │
-┌───────▼──────┐ ┌─────▼────────┐  ┌─────────────▼────────────┐
-│ Message Queue│ │  PostgreSQL  │  │    Llama Stack           │
-│  (RabbitMQ)  │ │  + pgvector  │  │  ┌────────────────────┐  │
-│              │ │  + TimescaleDB│  │  │ vLLM (Qwen/Llama) │  │
-└──────────────┘ └─────┬────────┘  │  │ Llama Guard 3     │  │
-                       │           │  │ RAG Engine        │  │
-                ┌──────▼──────┐    │  │ Memory/Context    │  │
-                │    Redis    │    │  └────────────────────┘  │
-                │   (Cache)   │    └──────────────────────────┘
-                └─────────────┘
+                ┌────────▼──────────┐
+                │   API Service     │
+                │  ┌──────────────┐ │
+                │  │ Auth         │ │
+                │  │ Quiz/Content │ │
+                │  │ Session Mgmt │ │
+                │  │ Analytics    │ │
+                │  └──────────────┘ │
+                └────────┬──────────┘
+                         │
+        ┌────────────────┼────────────────────────┐
+        │                │                        │
+┌───────▼──────────┐ ┌───▼──────────────┐ ┌──────▼────────────────┐
+│ WebSocket Service│ │ FAQ Worker Pool  │ │    Llama Stack        │
+│  (Real-time)     │ │ ┌──────────────┐ │ │ ┌──────────────────┐ │
+│                  │ │ │ Aggregation  │ │ │ │ vLLM Inference   │ │
+│ - Quiz/Poll      │ │ │ LLM Process  │ │ │ │ Llama Guard 3    │ │
+│ - FAQ            │ │ │ Answer Gen   │ │ │ │ RAG Engine       │ │
+│ - Leaderboard    │ │ │ Analysis     │ │ │ │ Memory/Context   │ │
+│                  │ │ └──────────────┘ │ │ └──────────────────┘ │
+└───────┬──────────┘ └───┬──────────────┘ └───────────────────────┘
+        │                │
+        └────────────────┼────────────────────┐
+                         │                    │
+        ┌────────────────┼────────────────────┼──────────┐
+        │                │                    │          │
+┌───────▼──────┐  ┌──────▼─────────┐  ┌──────▼──────┐  │
+│  RabbitMQ    │  │  PostgreSQL    │  │  Redis      │  │
+│  (Queues)    │  │  + pgvector    │  │  (Cache/    │  │
+└──────────────┘  │  + TimescaleDB │  │   Sessions) │  │
+                  └────────────────┘  └─────────────┘  │
+                                                        │
+                  ┌─────────────────────────────────────┘
+                  │
+          ┌───────▼──────────┐
+          │ Embedding Service│
+          │ (nomic-embed)    │
+          └──────────────────┘
 ```
 
 ### 2.2 FAQ Agent Architecture
@@ -275,168 +270,150 @@ faq.published               # Final broadcast to students
 analytics.event
 ```
 
-### 2.3 Core Service Responsibilities
+### 2.3 Simplified Service Architecture
 
-The platform consists of specialized microservices, each with distinct responsibilities:
+The platform now consists of **3 core services** plus supporting infrastructure:
 
-#### 2.3.1 Session Service
+#### 2.3.1 API Service (Unified REST API)
 
-**Purpose**: Manages the lifecycle of live quiz/poll/FAQ sessions
+**Purpose**: Single REST API handling all HTTP requests
 
-**Responsibilities**:
-- Create, start, pause, resume, and end sessions
-- Generate unique session PINs (6-8 character codes)
-- Track session state (waiting, active, paused, completed)
-- Manage current question progression
-- Track participant count in real-time
-- Handle session settings (randomize answers, show leaderboard, etc.)
-- Coordinate with WebSocket Hub for real-time updates
+**Consolidated Responsibilities**:
+- **Authentication (Auth Module)**
+  - OIDC authentication (university SSO)
+  - JWT token issuance and validation
+  - RBAC enforcement
+  - Participant PIN-based join (no auth required)
+
+- **Quiz/Content Management (Quiz Module)**
+  - Quiz set and question CRUD
+  - RAG document upload and management
+  - Document chunking and embedding orchestration
+  - Quiz export
+
+- **Session Management (Session Module)**
+  - Session lifecycle (create, start, pause, end)
+  - Session PIN generation
+  - Participant tracking
+  - Session state management
+
+- **Analytics (Analytics Module)**
+  - Session statistics and reports
+  - Question performance analysis
+  - Knowledge gap detection
+  - Data export (JSON/CSV)
 
 **Key Operations**:
-- `POST /api/v1/sessions` - Create new session
-- `POST /api/v1/sessions/:id/start` - Begin session
-- `POST /api/v1/sessions/:id/next-question` - Advance to next question
-- `POST /api/v1/sessions/:id/end` - End session and trigger archival
+```
+# Auth
+POST   /api/v1/auth/login
+GET    /api/v1/auth/oidc/callback
+POST   /api/v1/auth/refresh
 
-**Data**: Works with `sessions`, `participants` tables
+# Quiz/Content
+POST   /api/v1/quizzes
+POST   /api/v1/quizzes/:id/questions
+POST   /api/v1/quizzes/:id/documents        # RAG documents
+
+# Sessions
+POST   /api/v1/sessions
+POST   /api/v1/sessions/join/:pin            # Participant join
+POST   /api/v1/sessions/:id/start
+POST   /api/v1/sessions/:id/next-question
+
+# Analytics
+GET    /api/v1/analytics/sessions/:id
+GET    /api/v1/analytics/knowledge-gaps
+GET    /api/v1/sessions/:id/export
+```
+
+**Technology**: Node.js 20 (TypeScript), single deployable service
+
+**Data Access**: All PostgreSQL tables, Redis cache, TimescaleDB
 
 ---
 
-#### 2.3.2 Auth Service
+#### 2.3.2 WebSocket Service (Real-time Communication)
 
-**Purpose**: Authentication and authorization for hosts and admins
-
-**Responsibilities**:
-- OIDC authentication (university SSO integration)
-- JWT token issuance and validation
-- Refresh token management
-- User session management
-- Role-based access control (RBAC)
-- Integration with OpenShift OAuth (fallback)
-
-**Key Operations**:
-- `POST /api/v1/auth/login` - Initiate OIDC login
-- `GET /api/v1/auth/oidc/callback` - Handle OIDC redirect
-- `POST /api/v1/auth/refresh` - Refresh access token
-- `GET /api/v1/auth/me` - Get current user info
-
-**Data**: Works with `users` table
-
-**Note**: Participants do NOT use this service (they join via PIN only)
-
----
-
-#### 2.3.3 Quiz Service
-
-**Purpose**: Quiz set creation, management, and RAG document handling
+**Purpose**: Handles all real-time bidirectional communication
 
 **Responsibilities**:
-- CRUD operations for quiz sets
-- CRUD operations for questions (multiple choice, true/false, type answer, etc.)
-- Quiz duplication/cloning
-- Question reordering
-- **RAG document upload and management**
-  - Accept lecture slides, PDFs, notes
-  - Chunk documents (512 tokens with 50 token overlap)
-  - Generate embeddings via Embedding Service
-  - Store in `rag_documents` and `rag_document_chunks` tables
-- Quiz export (JSON format)
+- **Quiz/Poll Events**
+  - Question display synchronization
+  - Answer submission
+  - Live leaderboard updates
+  - Result visualization
 
-**Key Operations**:
-- `POST /api/v1/quizzes` - Create quiz set
-- `POST /api/v1/quizzes/:id/questions` - Add question
-- `POST /api/v1/quizzes/:id/documents` - Upload RAG document
-- `GET /api/v1/quizzes/:id/export` - Export quiz
+- **FAQ Events**
+  - Student question submission
+  - Answer publication notifications
+  - Upvote/downvote
 
-**Data**: Works with `quiz_sets`, `questions`, `rag_documents`, `rag_document_chunks` tables
-
----
-
-#### 2.3.4 Poll Service
-
-**Purpose**: Real-time polling and sentiment checks
-
-**Responsibilities**:
-- Handle poll-type questions (sentiment, word cloud, slider)
-- Collect participant votes in real-time
-- Aggregate poll results
-- Publish live results to WebSocket Hub for visualization
-- No "correct" answers (unlike quiz questions)
-
-**Key Operations**:
-- Vote collection via WebSocket events
-- Real-time aggregation
-- Result broadcasting
-
-**Data**: Works with `responses` table (with `is_correct` = NULL for polls)
-
----
-
-#### 2.3.5 FAQ Service
-
-**Purpose**: Student question submission and host moderation
-
-**Responsibilities**:
-- Accept FAQ questions from participants
-- Store questions in `faq_questions` table
-- Trigger FAQ processing pipeline (publishes to RabbitMQ)
-- Provide host interface for reviewing generated answers
-- Publish/unpublish FAQ answers
-- Voting on FAQ answers (upvote/downvote)
-
-**Key Operations**:
-- `POST /api/v1/sessions/:id/faq/submit` (via WebSocket) - Student submits question
-- `GET /api/v1/sessions/:id/faq/masters` - Get master questions with answers
-- `PUT /api/v1/sessions/:id/faq/masters/:mid` - Edit answer
-- `POST /api/v1/sessions/:id/faq/masters/:mid/publish` - Publish answer
-
-**Data**: Works with `faq_questions`, `faq_master_questions` tables
-
-**Note**: Does NOT perform LLM processing - that's handled by FAQ Agent Worker Pool
-
----
-
-#### 2.3.6 Analytics Service
-
-**Purpose**: Session analytics, performance metrics, and knowledge gap insights
-
-**Responsibilities**:
-- Calculate session statistics (participation rate, avg response time, correct answer rate)
-- Generate leaderboards
-- Question difficulty analysis
-- Cross-session knowledge gap analysis
-- Export session results (JSON, CSV)
-- Time-series metrics storage (TimescaleDB)
-
-**Key Operations**:
-- `GET /api/v1/analytics/sessions/:id` - Session performance report
-- `GET /api/v1/analytics/questions/:id` - Question difficulty & distribution
-- `GET /api/v1/analytics/knowledge-gaps` - Curriculum weak points across sessions
-- `GET /api/v1/sessions/:id/export` - Download session data
-
-**Data**: Works with `responses`, `participants`, `session_archives`, `session_metrics` (TimescaleDB)
-
-**Implementation**: Go 1.21 for high-performance analytics processing
-
----
-
-#### 2.3.7 WebSocket Hub
-
-**Purpose**: Real-time bidirectional communication between hosts and participants
-
-**Responsibilities**:
-- Maintain persistent WebSocket connections for hosts and participants
-- Broadcast session events (question shown, answer received, leaderboard update)
-- Room-based communication (one room per session)
-- Sticky sessions via Redis pub/sub (for multi-pod deployment)
-- Connection management (heartbeat, reconnection)
+- **Connection Management**
+  - WebSocket connection lifecycle
+  - Room-based broadcasting (one room per session)
+  - Heartbeat and reconnection
+  - Redis pub/sub for multi-pod coordination
 
 **Key Events**:
-- Host → Participants: `question:show`, `question:closed`, `leaderboard:update`, `faq:published`
-- Participant → Host: `answer:submit`, `faq:submit`
-- Host → Server: `session:start`, `question:show`, `question:close`
+```javascript
+// Host → Participants
+question:show           // Display question
+question:closed         // Stop accepting answers
+leaderboard:update      // Update rankings
+faq:published          // New FAQ answer available
 
-**Technology**: Socket.io with Redis adapter for horizontal scaling
+// Participant → Server
+answer:submit          // Quiz/poll response
+faq:submit            // FAQ question
+
+// Server → Host
+participant:joined     // New participant
+response:received      // Answer submitted
+faq:answer:generated   // New FAQ answer ready for review
+```
+
+**Technology**: Socket.io with Redis adapter
+
+**Integration**:
+- Reads from Redis for session state
+- Publishes FAQ questions to RabbitMQ
+- Subscribes to RabbitMQ for FAQ answer events
+
+---
+
+#### 2.3.3 FAQ Worker Pool (Background Processing)
+
+**Purpose**: Asynchronous FAQ question processing with LLM
+
+**Responsibilities**:
+- **Aggregation Worker**
+  - Batch questions every 30-60s
+  - Cluster similar questions using embeddings
+  - Create master questions
+
+- **LLM Processing Worker**
+  - Call Llama Stack inference API
+  - Enable RAG for context retrieval
+  - Handle retry and fallback logic
+
+- **Answer Generation Worker**
+  - Format LLM output with citations
+  - Quality validation
+  - Store in database
+
+- **Analysis Worker**
+  - Cross-session pattern analysis
+  - Knowledge gap insights
+  - Historical trend tracking
+
+**Technology**: Node.js worker threads, RabbitMQ consumers
+
+**Integration**:
+- Consumes from RabbitMQ queues
+- Calls Llama Stack API
+- Calls Embedding Service
+- Publishes results to RabbitMQ → WebSocket Service
 
 ---
 
@@ -447,26 +424,48 @@ The platform consists of specialized microservices, each with distinct responsib
 │                     Communication Flow                       │
 └─────────────────────────────────────────────────────────────┘
 
-Frontend (Host) ──REST──> Auth Service ──JWT──> Other Services
-                           │
-Frontend (Host) ──REST──> Quiz Service ──DB──> PostgreSQL
-                           │
-                           └──Embedding Service──> rag_documents
+Frontend ──HTTP/REST──> API Service ──PostgreSQL──> All Tables
+                         │           └──Redis──> Session Cache
+                         │
+                         └──triggers──> Embedding Service
+                                       (for RAG docs)
 
-Frontend (Host) ──REST──> Session Service ──Redis──> Session State
-                           │
-                           └──WebSocket Hub──> Participants
+Frontend ──WebSocket──> WebSocket Service ──Redis Pub/Sub──> Other pods
+                         │                └──RabbitMQ──> FAQ Workers
+                         │
+                         └──broadcasts──> All connected clients
 
-Participants ──WebSocket──> WebSocket Hub ──RabbitMQ──> FAQ Service
-                                   │
-                                   └──DB──> faq_questions
-
-FAQ Service ──RabbitMQ──> FAQ Agent Worker Pool ──Llama Stack──> Answers
-                                   │
-                                   └──WebSocket Hub──> Host/Participants
-
-Session End ──Trigger──> Analytics Service ──TimescaleDB──> Metrics
+FAQ Workers ──consume──> RabbitMQ
+            └──call──> Llama Stack (Inference + RAG + Safety)
+            └──call──> Embedding Service (clustering)
+            └──publish──> RabbitMQ ──> WebSocket Service
 ```
+
+### 2.5 Deployment Model
+
+**3 Core Services = 3 Kubernetes Deployments:**
+
+1. **api-service** (2-6 replicas)
+   - Stateless REST API
+   - Scales based on HTTP request load
+
+2. **websocket-service** (3-10 replicas)
+   - Stateful WebSocket connections
+   - Scales based on connected client count
+   - Sticky sessions via Redis
+
+3. **faq-worker-pool** (2-5 replicas)
+   - Background workers
+   - Scales based on RabbitMQ queue depth
+
+**Benefits of Simplified Architecture:**
+- ✅ **Fewer moving parts**: 3 services vs 7 original services
+- ✅ **Simpler deployment**: Less orchestration complexity
+- ✅ **Easier development**: Modules within monolith instead of microservices
+- ✅ **Reduced network latency**: In-process function calls vs HTTP
+- ✅ **Shared code/types**: Common data models across modules
+- ✅ **Still scalable**: Each service scales independently
+- ✅ **Clear boundaries**: API (sync), WebSocket (real-time), Workers (async)
 
 ---
 
@@ -483,6 +482,230 @@ Session End ──Trigger──> Analytics Service ──TimescaleDB──> Metr
 | UI Framework | Tailwind CSS + shadcn/ui | Rapid development, accessibility |
 | Charts/Leaderboard | Recharts + Framer Motion | Engaging visualizations |
 | QR Code | qrcode.react | Session join functionality |
+
+#### 3.1.1 Host Interface (Web Frontend) - Detailed Functionality
+
+The Host Interface is a React-based web application used by professors and teaching assistants to create, manage, and run interactive sessions.
+
+---
+
+**A. Dashboard & Quiz Management**
+
+**1. Home Dashboard**
+- View all created quizzes/quiz sets
+- Recent session history
+- Quick stats: total sessions run, avg participation, top performing quizzes
+- Quick actions: "Create New Quiz", "Start Session", "View Analytics"
+
+**2. Quiz Builder**
+- **Quiz Set Creation**
+  - Title, description, cover image
+  - Tags for categorization (e.g., "Week 3", "Recursion", "Midterm Review")
+  - Public/private toggle
+
+- **Question Editor**
+  - Drag-and-drop question reordering
+  - Question types:
+    - Multiple Choice (single or multiple answers)
+    - True/False
+    - Type Answer (text input with fuzzy matching)
+    - Slider (numeric range)
+    - Word Cloud (free text for sentiment)
+  - Question settings:
+    - Time limit (5-120 seconds)
+    - Points value (default 1000, time-bonus enabled)
+    - Media upload (images, videos, GIFs)
+  - Answer configuration:
+    - Mark correct answers
+    - Randomize answer order option
+  - Question preview
+
+**3. RAG Document Management** (NEW)
+- **Upload Interface**
+  - Drag-and-drop for PDFs, PPTX, DOCX, TXT
+  - Document type selection (lecture slides, syllabus, readings, etc.)
+  - Metadata: title, lecture date, page numbers
+- **Document List**
+  - View all uploaded documents for quiz set
+  - Processing status: "Uploading", "Chunking", "Embedding", "Ready"
+  - Preview button (first page/section)
+  - Delete and re-process options
+- **Usage Indicator**
+  - Shows which documents are referenced in FAQ answers
+  - Citation analytics: "Used in 12 FAQ answers"
+
+---
+
+**B. Session Management (Live Control)**
+
+**4. Pre-Session Setup**
+- **Create Session Screen**
+  - Select quiz set
+  - Choose mode: Quiz (competitive), Poll (sentiment), FAQ (Q&A), or Mixed
+  - Settings:
+    - Show leaderboard: Always / After each question / Never
+    - Allow late joins: Yes/No
+    - Randomize question order: Yes/No
+    - Enable FAQ mode: Yes/No
+  - Schedule start time (optional) or "Start Now"
+  - Generate QR code automatically
+
+**5. Lobby (Waiting Room)**
+- **Large QR Code Display**
+  - Prominent QR code for students to scan
+  - Session PIN displayed (large, bold, e.g., "ABC123")
+  - Join URL: `https://qaroot.university.edu/join/ABC123`
+- **Live Participant List**
+  - Real-time participant join notifications (with sound effect)
+  - Participant nicknames displayed
+  - Participant count: "42 participants joined"
+- **Host Controls**
+  - "Start Session" button (prominent, enabled when >0 participants)
+  - "Edit Settings" button
+  - "Cancel Session" button
+
+**6. Live Session Control Panel**
+- **Main Display Area**
+  - Current question displayed (same view as participants see)
+  - Timer countdown (circular progress indicator)
+  - Question number: "Question 5 of 12"
+
+- **Live Response Feed (Right Sidebar)**
+  - Real-time answer submissions
+  - Participant avatars + nicknames
+  - Response time indicator
+  - Correct/incorrect status (color-coded)
+  - Response rate: "38/42 answered (90%)"
+
+- **Host Controls Bar (Bottom)**
+  - "Show Question" - Reveals question to participants
+  - "Close Answers" - Stop accepting responses early
+  - "Show Results" - Display answer distribution
+  - "Show Leaderboard" - Display top 10 rankings
+  - "Next Question" - Advance to next
+  - "Pause Session" - Freeze session
+  - "End Session" - Complete and archive
+
+**7. Live Results Visualization**
+- **Answer Distribution**
+  - Bar chart showing percentage per answer option
+  - Correct answer highlighted in green
+  - Average response time displayed
+  - Hardest/easiest difficulty indicator
+
+- **Leaderboard Display**
+  - Top 10 participants
+  - Rank, nickname, score, streak indicator
+  - Animated transitions (Framer Motion)
+  - Point changes highlighted
+
+---
+
+**C. FAQ Mode Interface**
+
+**8. FAQ Question Queue**
+- **Left Panel: Incoming Questions**
+  - Live stream of student questions
+  - Questions appear as they're submitted
+  - Timestamp and participant nickname
+  - Automatically grouped by similarity (clustered)
+  - Badge showing cluster size: "3 similar questions"
+
+**9. FAQ Answer Review Panel**
+- **Generated Answer Card**
+  - Master question (representative of cluster)
+  - AI-generated answer with RAG citations
+  - Source documents referenced (clickable to view)
+  - Processing status: "Generating...", "Ready for Review", "Published"
+
+- **Host Actions**
+  - Edit answer (rich text editor)
+  - Approve & Publish
+  - Reject & Regenerate
+  - Add manual answer
+  - Preview how participants will see it
+
+**10. Published FAQ Display**
+- List of published Q&As
+- Upvote/downvote counts from participants
+- Unpublish option
+- Export FAQ to PDF/Markdown
+
+---
+
+**D. Analytics & Reporting**
+
+**11. Session Results Dashboard**
+- **Overview Metrics**
+  - Total participants
+  - Completion rate
+  - Average score
+  - Average response time
+  - Participation rate per question
+
+- **Question Performance**
+  - Table view: Question | Difficulty | Correct % | Avg Time
+  - Identify questions that are too easy/hard
+  - Distribution graphs (bell curve of scores)
+
+- **Participant Performance**
+  - Leaderboard (final rankings)
+  - Individual participant drill-down
+  - Time-to-answer trends
+  - Struggle indicators (questions with long response times)
+
+**12. Knowledge Gap Analysis** (NEW)
+- **Cross-Session Insights**
+  - Recurring FAQ topics across multiple sessions
+  - Trending confusion areas (e.g., "Pointers appeared in 80% of sessions")
+  - Comparison: current session vs. historical average
+  - Recommendations: "Consider adding lecture on topic X"
+
+- **FAQ Analytics**
+  - Most asked question categories
+  - Questions without good answers (low upvotes)
+  - Citation usage: which documents are most referenced
+  - Student engagement: FAQ submission rate per session
+
+**13. Export & Sharing**
+- **Export Options**
+  - JSON (full session data)
+  - CSV (responses, participants)
+  - PDF Report (summary with charts)
+  - FAQ Export (Markdown/PDF)
+- **Share Session**
+  - Public URL for results (anonymous)
+  - Integration with LMS (Canvas, Blackboard) - future enhancement
+
+---
+
+**E. User Experience Features**
+
+**14. Real-Time Updates**
+- All data updates via WebSocket (no page refresh needed)
+- Smooth animations for participant joins, answer submissions, leaderboard changes
+- Toast notifications for important events
+
+**15. Responsive Design**
+- Desktop-optimized (primary use case: projector/large screen)
+- Tablet support for on-the-go session management
+- Mobile view for monitoring sessions remotely
+
+**16. Keyboard Shortcuts**
+- Space: Show next question
+- Enter: Show results
+- L: Show leaderboard
+- P: Pause session
+- Esc: Cancel current action
+
+**17. Accessibility**
+- WCAG 2.1 AA compliant
+- Screen reader support
+- Keyboard navigation
+- High contrast mode
+- Configurable text size
+
+---
 
 ### 3.2 Backend Services
 
@@ -631,7 +854,6 @@ CREATE TYPE question_type AS ENUM (
     'true_false',
     'type_answer',
     'poll',
-    'puzzle',
     'slider',
     'word_cloud'
 );
@@ -656,7 +878,7 @@ CREATE INDEX idx_questions_quiz_set ON questions(quiz_set_id);
 -- Example config structures:
 -- Multiple choice: {"answers": [{"text": "Paris", "correct": true}, ...]}
 -- Slider: {"min": 0, "max": 100, "correct_value": 42, "tolerance": 5}
--- Puzzle: {"items": ["First", "Second", "Third"], "correct_order": [0,1,2]}
+-- Word cloud: {"max_words": 100}
 ```
 
 #### 4.1.4 Sessions Table
@@ -1417,26 +1639,25 @@ const generateFAQAnswerWithRAG = async (
 #### 7.1.1 Service Scaling Profiles
 
 ```yaml
-# OpenShift HorizontalPodAutoscaler configurations
+# OpenShift HorizontalPodAutoscaler configurations (Simplified Architecture)
 
-Session Service:
-  replicas: 2-8
-  target_cpu: 60%
-  custom_metric: active_sessions (target: 100/pod)
+API Service:
+  replicas: 2-6
+  target_cpu: 70%
+  target_memory: 80%
+  # Handles: Auth, Quiz, Session, Analytics
 
-WebSocket Hub:
-  replicas: 3-15
+WebSocket Service:
+  replicas: 3-10
   target_cpu: 50%
   custom_metric: connected_clients (target: 500/pod)
+  # Handles: Real-time events for quiz, poll, FAQ
 
-FAQ/LLM Service:
+FAQ Worker Pool:
   replicas: 2-5
-  target_cpu: 80%
-  queue_depth: 50 (scale up threshold)
-
-Quiz/Poll Services:
-  replicas: 2-6
-  target_cpu: 65%
+  target_cpu: 75%
+  custom_metric: rabbitmq_queue_depth (scale_up: 50, scale_down: 10)
+  # Handles: Background FAQ processing
 ```
 
 #### 7.1.2 Database Scaling
@@ -2485,7 +2706,7 @@ Security Tests:
 
 ## 12. Roadmap & Future Enhancements
 
-### Phase 1: MVP (Months 1-3)
+### Phase 1: MVP 
 - [x] Core architecture design (this document)
 - [ ] OpenShift cluster setup
 - [ ] User authentication (OIDC)
@@ -2495,7 +2716,7 @@ Security Tests:
 - [ ] Basic participant interface (web only)
 - [ ] Simple analytics dashboard
 
-### Phase 2: Enhanced Pedagogy (Months 4-6)
+### Phase 2: Enhanced Pedagogy
 - [ ] Polling mode (sentiment checks)
 - [ ] FAQ mode with LLM integration
 - [ ] Additional question types (type answer, slider)
@@ -2503,21 +2724,13 @@ Security Tests:
 - [ ] Detailed analytics (knowledge gap analysis)
 - [ ] Export functionality (JSON, CSV)
 
-### Phase 3: Scale & Polish (Months 7-9)
+### Phase 3: Scale & Polish 
 - [ ] Mobile app (React Native)
-- [ ] Advanced question types (puzzle, word cloud)
+- [ ] Advanced word cloud visualization
 - [ ] Multi-language support
 - [ ] LMS integration (Canvas)
 - [ ] Advanced LLM features (context-aware answers)
 - [ ] Comprehensive load testing & optimization
-
-### Phase 4: Research & Innovation (Months 10-12)
-- [ ] Longitudinal analytics (cross-semester trends)
-- [ ] AI-generated quiz suggestions (based on lecture content)
-- [ ] Adaptive questioning (adjust difficulty based on performance)
-- [ ] Collaborative quiz creation (multiple hosts)
-- [ ] Integration with university learning analytics platforms
-- [ ] Public API for third-party integrations
 
 ---
 
