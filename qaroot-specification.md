@@ -2854,31 +2854,103 @@ Security Tests:
 
 ## 12. Roadmap & Future Enhancements
 
-### Phase 1: MVP 
+### Phase 1: MVP (FAQ Mode with Llama Stack) - 3 Months
+**Core Focus**: Demonstrate AI-powered FAQ answering with RAG
+
 - [x] Core architecture design (this document)
-- [ ] OpenShift cluster setup
-- [ ] User authentication (OIDC)
-- [ ] Quiz builder (multiple choice, true/false only)
-- [ ] Session management (create, start, end)
+- [ ] **Infrastructure Setup**
+  - [ ] OpenShift cluster setup (4 GPU nodes)
+  - [ ] Deploy PostgreSQL with pgvector extension
+  - [ ] Deploy Redis for caching
+  - [ ] Deploy Red Hat AMQ
+
+- [ ] **vLLM & Llama Stack Deployment**
+  - [ ] Deploy vLLM for Qwen 2.5-14B (2 replicas)
+  - [ ] Deploy vLLM for Llama Guard 3 (2 replicas)
+  - [ ] Deploy Llama Stack orchestration layer
+  - [ ] Configure Llama Stack to connect to vLLM services
+  - [ ] Test embeddings generation (nomic-embed-text)
+  - [ ] Test RAG retrieval from pgvector
+
+- [ ] **Authentication & User Management**
+  - [ ] OIDC authentication (university SSO)
+  - [ ] User roles: Host, Admin
+  - [ ] Basic user profile management
+
+- [ ] **RAG Document Management**
+  - [ ] Document upload API (PDF, PPTX, DOCX)
+  - [ ] Document chunking service (512 token chunks)
+  - [ ] Embedding generation via Llama Stack
+  - [ ] Storage in rag_documents and rag_document_chunks tables
+  - [ ] Document management UI for hosts
+
+- [ ] **FAQ Mode Core Features**
+  - [ ] Session creation (FAQ-only mode)
+  - [ ] Real-time FAQ question submission (WebSocket)
+  - [ ] FAQ Worker Pool deployment
+    - [ ] Aggregation Agent (clustering similar questions)
+    - [ ] LLM Processing Agent (RAG-enhanced answer generation)
+    - [ ] Answer Generation Agent (formatting & citations)
+  - [ ] Host review interface for FAQ answers
+  - [ ] Publish/unpublish FAQ answers
+  - [ ] Upvote/downvote functionality
+
+- [ ] **Host Interface (FAQ Focus)**
+  - [ ] Dashboard with session list
+  - [ ] Document upload and management
+  - [ ] Session lobby with QR code
+  - [ ] Live FAQ queue (incoming questions)
+  - [ ] FAQ answer review panel
+  - [ ] Published FAQ display
+
+- [ ] **Participant Interface (Minimal)**
+  - [ ] Join session via PIN or QR code
+  - [ ] Submit FAQ questions
+  - [ ] View published FAQ answers
+  - [ ] Upvote/downvote answers
+
+- [ ] **Testing & Validation**
+  - [ ] Test RAG quality with sample course materials
+  - [ ] Validate Llama Guard safety filtering
+  - [ ] Load test: 100 concurrent participants, 50 questions/session
+  - [ ] End-to-end integration testing
+
+**Success Criteria**:
+- ✅ Host can upload course documents and see them processed
+- ✅ Students can submit questions and see AI-generated answers within 60 seconds
+- ✅ Answers cite source documents with 80%+ relevance
+- ✅ Llama Guard blocks 100% of test unsafe content
+- ✅ System handles 100 concurrent users
+
+---
+
+### Phase 2: Quiz Mode & Enhanced Analytics - 2 Months
+- [ ] Quiz builder (multiple choice, true/false, type answer)
 - [ ] Real-time quiz mode with leaderboard
-- [ ] Basic participant interface (web only)
-- [ ] Simple analytics dashboard
+- [ ] Participant scoring and rankings
+- [ ] Session analytics dashboard
+- [ ] Knowledge gap analysis (cross-session)
+- [ ] Export functionality (JSON, CSV, PDF)
 
-### Phase 2: Enhanced Pedagogy
-- [ ] Polling mode (sentiment checks)
-- [ ] FAQ mode with LLM integration
-- [ ] Additional question types (type answer, slider)
+### Phase 3: Polling & Additional Features - 2 Months
+- [ ] Polling mode (sentiment checks, word cloud, slider)
 - [ ] Session scheduling
-- [ ] Detailed analytics (knowledge gap analysis)
-- [ ] Export functionality (JSON, CSV)
+- [ ] Additional question types
+- [ ] Mobile-optimized web interface
+- [ ] Multi-language support (i18n)
 
-### Phase 3: Scale & Polish 
+### Phase 4: Scale & Polish - 2 Months
 - [ ] Mobile app (React Native)
-- [ ] Advanced word cloud visualization
-- [ ] Multi-language support
-- [ ] LMS integration (Canvas)
-- [ ] Advanced LLM features (context-aware answers)
-- [ ] Comprehensive load testing & optimization
+- [ ] LMS integration (Canvas, Blackboard)
+- [ ] Advanced LLM features (multi-turn Q&A, follow-up questions)
+- [ ] Comprehensive load testing (5000 concurrent users)
+- [ ] Performance optimizations
+
+### Phase 5: Research & Innovation - Ongoing
+- [ ] Longitudinal analytics (cross-semester trends)
+- [ ] Predictive models (identify at-risk students)
+- [ ] Adaptive questioning based on comprehension
+- [ ] Research publication on pedagogical impact
 
 ---
 
