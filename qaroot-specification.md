@@ -96,9 +96,9 @@ FAQ Service (API) → Publishes to Red Hat AMQ
     │                               │
     │  Workers consume from queues: │
     │  - faq.aggregate.queue        │
-    │  - faq.llm.queue             │
-    │  - faq.answer.queue          │
-    │  - faq.analysis.queue        │
+    │  - faq.llm.queue              │
+    │  - faq.answer.queue           │
+    │  - faq.analysis.queue         │
     └───────────────┬───────────────┘
                     ↓
             Llama Stack API
