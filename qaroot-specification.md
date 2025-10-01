@@ -66,11 +66,11 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
         └────────────────┼────────────┼──────────────────────────────┼───┐
                          │            │                              │   │
         ┌────────────────┼────────────┼───┐   ┌──────────────────────▼───▼──┐
-        │                │            │   │   │   vLLM Services (Separate)  │
-┌───────▼──────┐  ┌──────▼─────────┐  │   │   │ ┌───────────────────────┐   │
-│ Red Hat AMQ  │  │  PostgreSQL    │  │   │   │ │ vLLM: Qwen 14B (×2)   │   │
-│  (Queues)    │  │  + pgvector    │  │   │   │ │ vLLM: Guard 3 (×2)    │   │
-└──────────────┘  │  + TimescaleDB │  │   │   │ └───────────────────────┘   │
+        │                │            │   │   │   External LLM Service      │
+┌───────▼──────┐  ┌──────▼─────────┐  │   │   │  (Pre-existing OpenAI-      │
+│ Red Hat AMQ  │  │  PostgreSQL    │  │   │   │   compatible API)           │
+│  (Queues)    │  │  + pgvector    │  │   │   │                             │
+└──────────────┘  │  + TimescaleDB │  │   │   │  Managed by infrastructure  │
                   └────────────────┘  │   │   └─────────────────────────────┘
                               ┌───────▼───▼──┐
                               │    Redis     │
@@ -2100,156 +2100,26 @@ spec:
     - build-image
 ```
 
-### 8.5 vLLM and Llama Stack Deployment
+### 8.5 Llama Stack Deployment (External LLM Configuration)
 
-The architecture uses **separate vLLM deployments** for each model, with Llama Stack orchestrating them.
+The architecture uses a **pre-existing LLM service** (managed by infrastructure team) that exposes an OpenAI-compatible API. Llama Stack connects to this external service.
 
-#### 8.5.1 vLLM Deployment for Qwen2.5-14B (Primary Model)
+#### 8.5.1 Prerequisites
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vllm-qwen-14b
-  namespace: qaroot-production
-spec:
-  replicas: 2  # For HA
-  selector:
-    matchLabels:
-      app: vllm-qwen
-  template:
-    metadata:
-      labels:
-        app: vllm-qwen
-    spec:
-      nodeSelector:
-        nvidia.com/gpu: "true"
-      containers:
-      - name: vllm
-        image: vllm/vllm-openai:latest
-        args:
-        - --model
-        - Qwen/Qwen2.5-14B-Instruct
-        - --tensor-parallel-size
-        - "1"
-        - --max-model-len
-        - "8192"
-        - --gpu-memory-utilization
-        - "0.90"
-        - --port
-        - "8000"
-        - --trust-remote-code
-        ports:
-        - containerPort: 8000
-          name: http
-        resources:
-          requests:
-            nvidia.com/gpu: 1
-            memory: 32Gi
-            cpu: 4
-          limits:
-            nvidia.com/gpu: 1
-            memory: 48Gi
-            cpu: 8
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 300
-          periodSeconds: 30
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 300
-          periodSeconds: 10
+**External LLM Service Requirements:**
+- OpenAI-compatible API endpoint (e.g., vLLM, TGI, or other inference server)
+- Models available:
+  - Primary inference model (e.g., Qwen2.5-14B-Instruct or similar)
+  - Safety model (e.g., Llama Guard 3-8B or similar)
+- API endpoint URLs and authentication tokens (if required)
+
+**Note**: The LLM infrastructure is **not deployed as part of this project**. It is provided and managed separately by the university's AI infrastructure team or cloud provider.
+
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: vllm-qwen-service
-  namespace: qaroot-production
-spec:
-  selector:
-    app: vllm-qwen
-  ports:
-  - name: http
-    port: 8000
-    targetPort: 8000
-  type: ClusterIP
-```
 
-#### 8.5.2 vLLM Deployment for Llama Guard 3 (Safety)
+#### 8.5.2 Llama Stack ConfigMap
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vllm-llama-guard
-  namespace: qaroot-production
-spec:
-  replicas: 2  # Safety is critical
-  selector:
-    matchLabels:
-      app: vllm-guard
-  template:
-    metadata:
-      labels:
-        app: vllm-guard
-    spec:
-      nodeSelector:
-        nvidia.com/gpu: "true"
-      containers:
-      - name: vllm
-        image: vllm/vllm-openai:latest
-        args:
-        - --model
-        - meta-llama/Llama-Guard-3-8B
-        - --tensor-parallel-size
-        - "1"
-        - --max-model-len
-        - "4096"
-        - --gpu-memory-utilization
-        - "0.70"
-        - --port
-        - "8000"
-        ports:
-        - containerPort: 8000
-          name: http
-        resources:
-          requests:
-            nvidia.com/gpu: 1
-            memory: 18Gi
-            cpu: 2
-          limits:
-            nvidia.com/gpu: 1
-            memory: 24Gi
-            cpu: 4
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 200
-          periodSeconds: 30
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: vllm-guard-service
-  namespace: qaroot-production
-spec:
-  selector:
-    app: vllm-guard
-  ports:
-  - name: http
-    port: 8000
-    targetPort: 8000
-  type: ClusterIP
-```
-
-#### 8.5.3 Llama Stack Orchestration Layer
-
-Llama Stack connects to the separate vLLM services and provides a unified API.
+Llama Stack is configured to connect to the external LLM service.
 
 ```yaml
 apiVersion: v1
@@ -2261,14 +2131,15 @@ data:
   config.yaml: |
     version: 2
 
-    # Inference: Connect to remote vLLM service for Qwen
+    # Inference: Connect to external LLM service
+    # IMPORTANT: Replace EXTERNAL_LLM_URL with actual endpoint
     inference:
-      provider: remote::vllm
+      provider: remote::openai-compatible
       config:
-        url: http://vllm-qwen-service:8000/v1
-        api_token: null
+        url: ${EXTERNAL_LLM_URL}  # e.g., https://llm.university.edu/v1
+        api_key: ${EXTERNAL_LLM_API_KEY}  # from Secret
 
-    # Embeddings: Run internally in Llama Stack
+    # Embeddings: Run internally in Llama Stack (CPU-based)
     embeddings:
       provider: sentence-transformers
       config:
@@ -2276,12 +2147,13 @@ data:
         dimension: 768
         max_batch_size: 32
 
-    # Safety: Connect to remote vLLM service for Llama Guard
+    # Safety: Connect to external safety model
+    # IMPORTANT: Replace EXTERNAL_SAFETY_URL with actual endpoint
     safety:
-      provider: remote::vllm
+      provider: remote::openai-compatible
       config:
-        url: http://vllm-guard-service:8000/v1
-        api_token: null
+        url: ${EXTERNAL_SAFETY_URL}  # e.g., https://llm.university.edu/safety/v1
+        api_key: ${EXTERNAL_SAFETY_API_KEY}  # from Secret
 
     # Memory: Store in PostgreSQL
     memory:
@@ -2304,6 +2176,19 @@ data:
       chunk_size: 512
       chunk_overlap: 50
       top_k: 5
+---
+# Secret for external LLM credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+  namespace: qaroot-production
+type: Opaque
+stringData:
+  llm-url: "https://llm.university.edu/v1"  # Replace with actual
+  llm-api-key: "your-api-key-here"          # Replace with actual
+  safety-url: "https://llm.university.edu/safety/v1"  # Replace with actual
+  safety-api-key: "your-api-key-here"       # Replace with actual
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -2341,13 +2226,33 @@ spec:
             secretKeyRef:
               name: postgres-credentials
               key: connection-string
+        - name: EXTERNAL_LLM_URL
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: llm-url
+        - name: EXTERNAL_LLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: llm-api-key
+        - name: EXTERNAL_SAFETY_URL
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: safety-url
+        - name: EXTERNAL_SAFETY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: safety-api-key
         resources:
           requests:
+            memory: 4Gi
+            cpu: 2
+          limits:
             memory: 8Gi
             cpu: 4
-          limits:
-            memory: 16Gi
-            cpu: 8
         livenessProbe:
           httpGet:
             path: /health
@@ -2383,20 +2288,15 @@ spec:
 # No separate embedding service deployment needed
 ```
 
-#### 8.5.4 Deployment Architecture Summary
+#### 8.5.3 Deployment Architecture Summary
 
-**Total GPU Requirements:**
-- **Qwen2.5-14B**: 2 replicas × 1 GPU = **2 GPUs** (A100 40GB or L40S recommended)
-- **Llama Guard 3**: 2 replicas × 1 GPU = **2 GPUs** (L4 or T4 acceptable)
-- **Total: 4 GPUs minimum** for production deployment
-
-**Architecture Benefits:**
-- ✅ **vLLM and Llama Stack are separate**: vLLM provides inference, Llama Stack orchestrates
-- ✅ **Independent scaling**: Scale vLLM inference pods without restarting Llama Stack
-- ✅ **High availability**: Qwen and Guard both have 2 replicas for redundancy
-- ✅ **Resource isolation**: Inference models don't compete for GPU memory
+**External LLM Integration:**
+- ✅ **No GPU infrastructure required**: Uses pre-existing institutional LLM service
+- ✅ **Simplified operations**: No vLLM deployment or GPU node management needed
+- ✅ **Cost optimization**: Leverages existing LLM infrastructure investment
+- ✅ **Centralized compliance**: Uses university-managed LLM with consistent safety policies
 - ✅ **Unified API**: Llama Stack provides single endpoint for all AI operations
-- ✅ **Safety always on**: Llama Guard has 2 replicas for critical safety filtering
+- ✅ **Flexible embeddings**: Can use external or local embedding models via sentence-transformers
 
 **Request Flow:**
 ```
@@ -2404,23 +2304,24 @@ Application
     ↓
 Llama Stack API (http://llama-stack:5000)
     ↓
-    ├──[Inference Request]──→ vllm-qwen-service:8000      (Qwen inference via OpenAI API)
-    ├──[Safety Check]───────→ vllm-guard-service:8000     (Llama Guard via OpenAI API)
-    ├──[Embeddings]─────────→ Internal (sentence-transformers in Llama Stack)
+    ├──[Inference Request]──→ External LLM Service (e.g., https://llm.university.edu/v1)
+    ├──[Safety Check]───────→ External Safety Service (e.g., https://llm.university.edu/safety/v1)
+    ├──[Embeddings]─────────→ External or Internal (sentence-transformers in Llama Stack)
     └──[RAG/Memory]─────────→ PostgreSQL + pgvector
 ```
 
-**Key Architecture Points:**
-- vLLM services expose OpenAI-compatible APIs
-- Llama Stack connects to vLLM as remote providers
-- Embeddings run inside Llama Stack (no GPU needed)
-- RAG retrieval uses pgvector in PostgreSQL
+**Configuration Requirements:**
+- External LLM service must support OpenAI-compatible API (chat/completions endpoint)
+- External safety service must support OpenAI-compatible API for content filtering
+- API credentials stored in Kubernetes Secret (`llm-credentials`)
+- Llama Stack uses `remote::openai-compatible` provider type
+- All external endpoints configured via environment variables in Llama Stack deployment
 
-**Node Affinity Strategy:**
-- Use `nodeSelector: nvidia.com/gpu: "true"` to place vLLM pods on GPU nodes
-- Consider node taints/tolerations to dedicate nodes to specific models
-- Example: Dedicate 2 nodes with A100s for Qwen, 1 node with L4s for Guard
-- Llama Stack pods don't need GPUs (embeddings run on CPU)
+**Deployment Benefits:**
+- No GPU nodes required in OpenShift cluster
+- Llama Stack pods run on CPU-only nodes (4Gi-8Gi memory, 2-4 cores)
+- Simplified horizontal scaling - just adjust Llama Stack replicas
+- Embeddings can run locally in Llama Stack or use external embedding API
 
 ---
 
@@ -2859,17 +2760,18 @@ Security Tests:
 
 - [x] Core architecture design (this document)
 - [ ] **Infrastructure Setup**
-  - [ ] OpenShift cluster setup (4 GPU nodes)
+  - [ ] OpenShift cluster setup (CPU-only nodes, no GPU required)
   - [ ] Deploy PostgreSQL with pgvector extension
   - [ ] Deploy Redis for caching
   - [ ] Deploy Red Hat AMQ
+  - [ ] Obtain credentials for external LLM service
 
-- [ ] **vLLM & Llama Stack Deployment**
-  - [ ] Deploy vLLM for Qwen 2.5-14B (2 replicas)
-  - [ ] Deploy vLLM for Llama Guard 3 (2 replicas)
-  - [ ] Deploy Llama Stack orchestration layer
-  - [ ] Configure Llama Stack to connect to vLLM services
-  - [ ] Test embeddings generation (nomic-embed-text)
+- [ ] **Llama Stack Configuration**
+  - [ ] Create Kubernetes Secret with external LLM credentials
+  - [ ] Deploy Llama Stack orchestration layer (2 replicas)
+  - [ ] Configure Llama Stack to connect to external LLM service
+  - [ ] Configure Llama Stack to connect to external safety service
+  - [ ] Test embeddings generation (nomic-embed-text or external)
   - [ ] Test RAG retrieval from pgvector
 
 - [ ] **Authentication & User Management**
@@ -2966,9 +2868,9 @@ Security Tests:
 | Real-time | Socket.io | Native WebSocket, SSE | Fallbacks, Redis adapter |
 | Frontend | React | Vue, Svelte | Ecosystem, React Native reuse |
 | LLM Stack | Llama Stack | LangChain, LlamaIndex | Unified API: inference, RAG, safety, memory |
-| LLM Serving | vLLM (separate) | TGI, Ollama | Highest throughput, independent scaling |
-| LLM Model | Qwen2.5-14B | Llama-3.x, Mistral, GPT-4 | Best instruction-following, multilingual |
-| Safety | Llama Guard 3 | OpenAI Moderation, Custom | Native vLLM integration, 13 categories |
+| LLM Deployment | External (pre-existing) | Self-hosted vLLM, TGI | Leverage existing infrastructure, cost optimization |
+| LLM Model | Qwen2.5-14B (external) | Llama-3.x, Mistral, GPT-4 | Best instruction-following, multilingual |
+| Safety | External safety service | OpenAI Moderation, Custom | Centralized university compliance |
 | Embeddings | nomic-embed-text | BGE, E5, OpenAI | Open-source, efficient, runs in Stack |
 
 ### Appendix B: References
@@ -2980,8 +2882,7 @@ Security Tests:
 **Technical Documentation:**
 - [OpenShift Documentation](https://docs.openshift.com/)
 - [Llama Stack Documentation](https://llama-stack.readthedocs.io/)
-- [vLLM Documentation](https://docs.vllm.ai/)
-- [Llama Guard 3](https://ai.meta.com/research/publications/llama-guard-3/)
+- [Llama Stack Remote Providers](https://llama-stack.readthedocs.io/en/latest/distributions/remote_vllm.html)
 - [Socket.io Scalability Guide](https://socket.io/docs/v4/using-multiple-nodes/)
 - [PostgreSQL High Availability](https://www.postgresql.org/docs/15/high-availability.html)
 - [pgvector Documentation](https://github.com/pgvector/pgvector)
