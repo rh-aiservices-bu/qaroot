@@ -66,7 +66,7 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
         ┌────────────────┼────────────────────┼──────────┐
         │                │                    │          │
 ┌───────▼──────┐  ┌──────▼─────────┐  ┌──────▼──────┐  │
-│  RabbitMQ    │  │  PostgreSQL    │  │  Redis      │  │
+│ Red Hat AMQ  │  │  PostgreSQL    │  │  Redis      │  │
 │  (Queues)    │  │  + pgvector    │  │  (Cache/    │  │
 └──────────────┘  │  + TimescaleDB │  │   Sessions) │  │
                   └────────────────┘  └─────────────┘  │
@@ -81,14 +81,14 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
 
 ### 2.2 FAQ Agent Architecture
 
-The FAQ answering system uses a **worker pool of specialized agents** that coordinate via RabbitMQ and integrate with Llama Stack for AI capabilities.
+The FAQ answering system uses a **worker pool of specialized agents** that coordinate via Red Hat AMQ and integrate with Llama Stack for AI capabilities.
 
 #### 2.2.1 Agent Services Overview
 
-**FAQ Agent Worker Pool** is a Node.js/TypeScript service that runs multiple concurrent workers, each executing one of four specialized agent types. These agents communicate via RabbitMQ message queues and leverage Llama Stack for LLM operations.
+**FAQ Agent Worker Pool** is a Node.js/TypeScript service that runs multiple concurrent workers, each executing one of four specialized agent types. These agents communicate via Red Hat AMQ message queues and leverage Llama Stack for LLM operations.
 
 ```
-FAQ Service (API) → Publishes to RabbitMQ
+FAQ Service (API) → Publishes to Red Hat AMQ
                     ↓
     ┌───────────────┴───────────────┐
     │   FAQ Agent Worker Pool       │
@@ -115,12 +115,12 @@ FAQ Service (API) → Publishes to RabbitMQ
   3. Performs vector similarity search in pgvector to find similar questions
   4. Clusters questions with cosine similarity > 0.85
   5. Selects representative "master question" for each cluster
-  6. Publishes `faq.cluster.created` event to RabbitMQ
+  6. Publishes `faq.cluster.created` event to Red Hat AMQ
 - **Output**: Master questions ready for answer generation
 - **No direct Llama Stack usage** (uses separate embedding service)
 
 **2. LLM Processing Agent**
-- **Trigger**: Consumes `faq.cluster.created` messages from RabbitMQ
+- **Trigger**: Consumes `faq.cluster.created` messages from Red Hat AMQ
 - **Process**:
   1. Receives master question and cluster metadata
   2. Calls **Llama Stack Inference API** with:
@@ -130,6 +130,7 @@ FAQ Service (API) → Publishes to RabbitMQ
   3. Implements retry logic (3 attempts with exponential backoff)
   4. Falls back to Llama-3.1-8B if Qwen fails
   5. Streams response tokens as they're generated
+  6. Publishes `faq.llm.completed` to Red Hat AMQ (with raw answer)
 - **Output**: Raw LLM-generated answer text
 - **Llama Stack API Used**: `inference.chatCompletion()` with RAG + Safety
 
@@ -166,7 +167,7 @@ Student → FAQ Question Submission
     ▼
 [FAQ Service]
     │ Validates & stores question in PostgreSQL (faq_questions table)
-    │ Publishes: faq.question.submitted → RabbitMQ
+    │ Publishes: faq.question.submitted → Red Hat AMQ
     │ Returns: 202 Accepted to student
     │
     ▼ (Every 30-60s)
@@ -176,7 +177,7 @@ Student → FAQ Question Submission
     │ 3. Vector search in pgvector (cosine similarity)
     │ 4. Clusters similar questions (similarity > 0.85)
     │ 5. Selects master question per cluster
-    │ 6. Publishes: faq.cluster.created → RabbitMQ
+    │ 6. Publishes: faq.cluster.created → Red Hat AMQ
     │
     ▼
 [LLM Processing Agent Worker]
@@ -196,7 +197,7 @@ Student → FAQ Question Submission
     │    - Calls vLLM inference with RAG context
     │    - Runs Llama Guard 3 on output
     │ 5. Receives answer with citations
-    │ 6. Publishes: faq.llm.completed → RabbitMQ (with raw answer)
+    │ 6. Publishes: faq.llm.completed → Red Hat AMQ (with raw answer)
     │
     ▼
 [Answer Generation Agent Worker]
@@ -250,7 +251,7 @@ Student → FAQ Question Submission
 
 #### 2.2.5 Message-Driven Communication
 
-- **Message Broker:** RabbitMQ with topic exchanges
+- **Message Broker:** Red Hat AMQ (ActiveMQ Artemis) with topic exchanges
 - **Message Patterns:**
   - Command: Direct service invocation
   - Event: Broadcast state changes
@@ -377,8 +378,8 @@ faq:answer:generated   // New FAQ answer ready for review
 
 **Integration**:
 - Reads from Redis for session state
-- Publishes FAQ questions to RabbitMQ
-- Subscribes to RabbitMQ for FAQ answer events
+- Publishes FAQ questions to Red Hat AMQ
+- Subscribes to Red Hat AMQ for FAQ answer events
 
 ---
 
@@ -407,13 +408,13 @@ faq:answer:generated   // New FAQ answer ready for review
   - Knowledge gap insights
   - Historical trend tracking
 
-**Technology**: Node.js worker threads, RabbitMQ consumers
+**Technology**: Node.js worker threads, Red Hat AMQ consumers
 
 **Integration**:
-- Consumes from RabbitMQ queues
+- Consumes from Red Hat AMQ queues
 - Calls Llama Stack API
 - Calls Embedding Service
-- Publishes results to RabbitMQ → WebSocket Service
+- Publishes results to Red Hat AMQ → WebSocket Service
 
 ---
 
@@ -431,14 +432,14 @@ Frontend ──HTTP/REST──> API Service ──PostgreSQL──> All Tables
                                        (for RAG docs)
 
 Frontend ──WebSocket──> WebSocket Service ──Redis Pub/Sub──> Other pods
-                         │                └──RabbitMQ──> FAQ Workers
+                         │                └──Red Hat AMQ──> FAQ Workers
                          │
                          └──broadcasts──> All connected clients
 
-FAQ Workers ──consume──> RabbitMQ
+FAQ Workers ──consume──> Red Hat AMQ
             └──call──> Llama Stack (Inference + RAG + Safety)
             └──call──> Embedding Service (clustering)
-            └──publish──> RabbitMQ ──> WebSocket Service
+            └──publish──> Red Hat AMQ ──> WebSocket Service
 ```
 
 ### 2.5 Deployment Model
@@ -456,7 +457,7 @@ FAQ Workers ──consume──> RabbitMQ
 
 3. **faq-worker-pool** (2-5 replicas)
    - Background workers
-   - Scales based on RabbitMQ queue depth
+   - Scales based on Red Hat AMQ queue depth
 
 **Benefits of Simplified Architecture:**
 - ✅ **Fewer moving parts**: 3 services vs 7 original services
@@ -714,7 +715,7 @@ The Host Interface is a React-based web application used by professors and teach
 | Service Runtime | Node.js 20 (TypeScript) | Async I/O, WebSocket support |
 | Alternative Runtime | Go 1.21 | High-performance services (Analytics) |
 | Real-time Engine | Socket.io | Auto-scaling, Redis adapter |
-| Message Queue | RabbitMQ | Reliable, supports priority queues |
+| Message Queue | Red Hat AMQ (Artemis) | Enterprise messaging, Red Hat support |
 | Caching | Redis 7 | Fast session state, leaderboards |
 | Task Scheduling | Bull (Redis-backed) | Distributed job processing |
 
@@ -1656,7 +1657,7 @@ WebSocket Service:
 FAQ Worker Pool:
   replicas: 2-5
   target_cpu: 75%
-  custom_metric: rabbitmq_queue_depth (scale_up: 50, scale_down: 10)
+  custom_metric: amq_queue_depth (scale_up: 50, scale_down: 10)
   # Handles: Background FAQ processing
 ```
 
@@ -2519,14 +2520,20 @@ services:
     ports:
       - "6379:6379"
 
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
+  amq:
+    image: registry.redhat.io/amq7/amq-broker-rhel8:latest
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5672:5672"      # AMQP
+      - "8161:8161"      # Web Console
+      - "61616:61616"    # OpenWire
     environment:
-      RABBITMQ_DEFAULT_USER: dev
-      RABBITMQ_DEFAULT_PASS: dev_password
+      AMQ_USER: admin
+      AMQ_PASSWORD: admin
+      AMQ_ROLE: admin
+      AMQ_NAME: broker
+      AMQ_TRANSPORTS: openwire,amqp,stomp,mqtt,hornetq
+      AMQ_QUEUES: faq.aggregate.queue,faq.llm.queue,faq.answer.queue,faq.analysis.queue
+      AMQ_REQUIRE_LOGIN: true
 
   minio:
     image: minio/minio
@@ -2560,8 +2567,9 @@ REDIS_URL=redis://localhost:6379
 REDIS_CACHE_URL=redis://localhost:6379/1
 REDIS_RATE_LIMIT_URL=redis://localhost:6379/2
 
-# RabbitMQ
-RABBITMQ_URL=amqp://dev:dev_password@localhost:5672
+# Red Hat AMQ
+AMQ_URL=amqp://admin:admin@localhost:5672
+AMQ_MANAGEMENT_URL=http://localhost:8161
 
 # Object Storage
 MINIO_ENDPOINT=localhost:9000
@@ -2742,7 +2750,7 @@ Security Tests:
 |----------|--------|-------------------------|-----------|
 | Backend Runtime | Node.js | Python (FastAPI), Go | Async I/O for WebSockets, ecosystem |
 | Database | PostgreSQL | MongoDB, CockroachDB | ACID, pgvector, TimescaleDB compat |
-| Message Queue | RabbitMQ | Redis Streams, Kafka | Lightweight, priority queues |
+| Message Queue | Red Hat AMQ | Kafka, RabbitMQ | Red Hat support, enterprise features |
 | Real-time | Socket.io | Native WebSocket, SSE | Fallbacks, Redis adapter |
 | Frontend | React | Vue, Svelte | Ecosystem, React Native reuse |
 | LLM Stack | Llama Stack | LangChain, LlamaIndex | Unified API: inference, RAG, safety, memory |
