@@ -825,9 +825,10 @@ CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL, -- bcrypt hash (MVP: basic auth)
     full_name VARCHAR(255),
     role VARCHAR(50) NOT NULL CHECK (role IN ('host', 'admin')),
-    oidc_subject VARCHAR(255) UNIQUE, -- OIDC 'sub' claim
+    oidc_subject VARCHAR(255) UNIQUE, -- For future OIDC integration (post-MVP)
     institution VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -836,16 +837,20 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_oidc ON users(oidc_subject);
 ```
 
-#### 4.1.2 Quiz Sets Table
+#### 4.1.2 Document Collections Table
 ```sql
-CREATE TABLE quiz_sets (
+-- MVP: Document collections for FAQ sessions
+-- Future: Can also store quiz sets for quiz/poll modes
+CREATE TABLE document_collections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
     description TEXT,
+    collection_type VARCHAR(50) DEFAULT 'faq', -- 'faq', 'quiz', 'poll' (future)
     cover_image_url VARCHAR(1000),
     is_public BOOLEAN DEFAULT FALSE,
     tags TEXT[], -- Array of tags for categorization
@@ -853,12 +858,18 @@ CREATE TABLE quiz_sets (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_quiz_sets_owner ON quiz_sets(owner_id);
-CREATE INDEX idx_quiz_sets_tags ON quiz_sets USING GIN(tags);
+CREATE INDEX idx_collections_owner ON document_collections(owner_id);
+CREATE INDEX idx_collections_type ON document_collections(collection_type);
+CREATE INDEX idx_collections_tags ON document_collections USING GIN(tags);
+
+-- Legacy alias for backward compatibility (future phases)
+CREATE VIEW quiz_sets AS
+SELECT * FROM document_collections WHERE collection_type = 'quiz';
 ```
 
 #### 4.1.3 Questions Table
 ```sql
+-- Future Phase: Quiz/Poll questions (not used in MVP)
 CREATE TYPE question_type AS ENUM (
     'multiple_choice',
     'true_false',
@@ -870,7 +881,7 @@ CREATE TYPE question_type AS ENUM (
 
 CREATE TABLE questions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    quiz_set_id UUID NOT NULL REFERENCES quiz_sets(id) ON DELETE CASCADE,
+    collection_id UUID NOT NULL REFERENCES document_collections(id) ON DELETE CASCADE,
     question_order INTEGER NOT NULL,
     question_type question_type NOT NULL,
     question_text TEXT NOT NULL,
@@ -880,10 +891,10 @@ CREATE TABLE questions (
     config JSONB, -- Type-specific configuration
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(quiz_set_id, question_order)
+    UNIQUE(collection_id, question_order)
 );
 
-CREATE INDEX idx_questions_quiz_set ON questions(quiz_set_id);
+CREATE INDEX idx_questions_collection ON questions(collection_id);
 
 -- Example config structures:
 -- Multiple choice: {"answers": [{"text": "Paris", "correct": true}, ...]}
@@ -893,21 +904,22 @@ CREATE INDEX idx_questions_quiz_set ON questions(quiz_set_id);
 
 #### 4.1.4 Sessions Table
 ```sql
-CREATE TYPE session_mode AS ENUM ('quiz', 'poll', 'faq');
+CREATE TYPE session_mode AS ENUM ('quiz', 'poll', 'faq'); -- MVP uses 'faq' only
 CREATE TYPE session_status AS ENUM ('scheduled', 'waiting', 'active', 'paused', 'completed', 'archived');
 
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    quiz_set_id UUID REFERENCES quiz_sets(id) ON DELETE SET NULL,
+    collection_id UUID REFERENCES document_collections(id) ON DELETE SET NULL,
     host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(500) NOT NULL,
     session_pin VARCHAR(8) UNIQUE NOT NULL, -- 6-8 digit join code
-    session_mode session_mode NOT NULL,
+    session_mode session_mode NOT NULL DEFAULT 'faq', -- MVP: always 'faq'
     session_status session_status DEFAULT 'waiting',
     scheduled_start TIMESTAMP WITH TIME ZONE,
     actual_start TIMESTAMP WITH TIME ZONE,
     ended_at TIMESTAMP WITH TIME ZONE,
-    current_question_id UUID REFERENCES questions(id),
-    current_question_started_at TIMESTAMP WITH TIME ZONE,
+    current_question_id UUID REFERENCES questions(id), -- Future: for quiz mode
+    current_question_started_at TIMESTAMP WITH TIME ZONE, -- Future: for quiz mode
     settings JSONB, -- Session-specific settings
     participant_count INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -915,11 +927,13 @@ CREATE TABLE sessions (
 );
 
 CREATE INDEX idx_sessions_host ON sessions(host_id);
+CREATE INDEX idx_sessions_collection ON sessions(collection_id);
 CREATE INDEX idx_sessions_pin ON sessions(session_pin);
 CREATE INDEX idx_sessions_status ON sessions(session_status);
 
 -- Example settings:
--- {"show_leaderboard": true, "randomize_answers": true, "allow_late_joins": false}
+-- MVP FAQ: {"allow_anonymous": true, "max_participants": 500}
+-- Future Quiz: {"show_leaderboard": true, "randomize_answers": true, "allow_late_joins": false}
 ```
 
 #### 4.1.5 Participants Table
@@ -1021,7 +1035,7 @@ CREATE TYPE document_type AS ENUM (
 
 CREATE TABLE rag_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    quiz_set_id UUID REFERENCES quiz_sets(id) ON DELETE CASCADE,
+    collection_id UUID REFERENCES document_collections(id) ON DELETE CASCADE,
     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     document_type document_type NOT NULL,
     title VARCHAR(500) NOT NULL,
@@ -1033,7 +1047,7 @@ CREATE TABLE rag_documents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_rag_quiz_set ON rag_documents(quiz_set_id);
+CREATE INDEX idx_rag_collection ON rag_documents(collection_id);
 CREATE INDEX idx_rag_owner ON rag_documents(owner_id);
 CREATE INDEX idx_rag_type ON rag_documents(document_type);
 CREATE INDEX idx_rag_embedding ON rag_documents USING ivfflat (embedding vector_cosine_ops);

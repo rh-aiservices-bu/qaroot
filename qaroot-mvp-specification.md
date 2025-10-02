@@ -351,16 +351,16 @@ CREATE INDEX idx_chunk_embedding ON rag_document_chunks USING ivfflat (embedding
 
 | Service | Replicas | CPU | Memory | Storage |
 |---------|----------|-----|--------|---------|
-| API Service | 2 | 1-2 | 2-4Gi | - |
-| WebSocket Service | 2 | 1-2 | 2-4Gi | - |
-| FAQ Worker Pool | 2 | 2-4 | 4-8Gi | - |
-| Llama Stack | 2 | 2-4 | 4-8Gi | - |
+| API Service | 1 | 1-2 | 2-4Gi | - |
+| WebSocket Service | 1 | 1-2 | 2-4Gi | - |
+| FAQ Worker Pool | 1 | 2-4 | 4-8Gi | - |
+| Llama Stack | 1 | 2-4 | 4-8Gi | - |
 | PostgreSQL | 1 | 2-4 | 8-16Gi | 100Gi |
 | Redis | 1 | 1-2 | 2-4Gi | - |
 | Red Hat AMQ | 1 | 1-2 | 2-4Gi | 10Gi |
-| Frontend (Nginx) | 2 | 0.5-1 | 512Mi-1Gi | - |
+| Frontend (Nginx) | 1 | 0.5-1 | 512Mi-1Gi | - |
 
-**Total:** ~15-25 CPU cores, ~30-55Gi memory, 110Gi storage
+**Total:** ~10-18 CPU cores, ~22-40Gi memory, 110Gi storage
 
 ### 4.2 Llama Stack Deployment
 
@@ -445,7 +445,7 @@ metadata:
   name: llama-stack
   namespace: qaroot-mvp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: llama-stack
@@ -753,7 +753,7 @@ metadata:
   name: api-service
   namespace: qaroot-mvp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: api-service
@@ -837,7 +837,7 @@ metadata:
   name: websocket-service
   namespace: qaroot-mvp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: websocket-service
@@ -898,7 +898,7 @@ metadata:
   name: faq-worker-pool
   namespace: qaroot-mvp
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: faq-worker-pool
@@ -1003,9 +1003,358 @@ EXTERNAL_SAFETY_API_KEY=safety-api-key-here
 
 ---
 
-## 6. Implementation Checklist
+## 6. Helm Chart Structure
 
-### Month 1: Foundation
+The application will be deployed using a Helm chart for simplified configuration management and deployment across different environments.
+
+### 6.1 Chart Structure
+
+```
+qaroot/
+├── Chart.yaml                 # Chart metadata
+├── values.yaml                # Default configuration values
+├── values-dev.yaml            # Development environment overrides
+├── values-staging.yaml        # Staging environment overrides
+├── values-production.yaml     # Production environment overrides
+├── templates/
+│   ├── _helpers.tpl           # Template helpers
+│   ├── NOTES.txt              # Post-install instructions
+│   │
+│   ├── namespace.yaml         # Namespace definition
+│   │
+│   ├── secrets/
+│   │   ├── app-credentials.yaml
+│   │   ├── llm-credentials.yaml
+│   │   ├── postgres-credentials.yaml
+│   │   └── amq-credentials.yaml
+│   │
+│   ├── configmaps/
+│   │   └── llama-stack-config.yaml
+│   │
+│   ├── postgresql/
+│   │   ├── statefulset.yaml
+│   │   ├── service.yaml
+│   │   └── pvc.yaml
+│   │
+│   ├── redis/
+│   │   ├── deployment.yaml
+│   │   └── service.yaml
+│   │
+│   ├── amq/
+│   │   ├── deployment.yaml
+│   │   └── service.yaml
+│   │
+│   ├── llama-stack/
+│   │   ├── deployment.yaml
+│   │   └── service.yaml
+│   │
+│   ├── api-service/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── route.yaml
+│   │
+│   ├── websocket-service/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── route.yaml
+│   │
+│   ├── faq-worker-pool/
+│   │   └── deployment.yaml
+│   │
+│   └── frontend/
+│       ├── deployment.yaml
+│       ├── service.yaml
+│       └── route.yaml
+│
+└── README.md                  # Chart documentation
+```
+
+### 6.2 Sample values.yaml
+
+```yaml
+# Global settings
+global:
+  namespace: qaroot-mvp
+  domain: qaroot.university.edu
+
+# Image settings
+images:
+  apiService:
+    repository: qaroot/api-service
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  websocketService:
+    repository: qaroot/websocket-service
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  faqWorkerPool:
+    repository: qaroot/faq-worker-pool
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  frontend:
+    repository: qaroot/frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  llamaStack:
+    repository: llamastack/distribution
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  postgresql:
+    repository: pgvector/pgvector
+    tag: pg15
+    pullPolicy: IfNotPresent
+
+  redis:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+
+  amq:
+    repository: registry.redhat.io/amq7/amq-broker
+    tag: "7.11"
+    pullPolicy: IfNotPresent
+
+# Replica counts
+replicaCount:
+  apiService: 1
+  websocketService: 1
+  faqWorkerPool: 1
+  llamaStack: 1
+  frontend: 1
+
+# Resource limits
+resources:
+  apiService:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  websocketService:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  faqWorkerPool:
+    requests:
+      memory: 4Gi
+      cpu: 2
+    limits:
+      memory: 8Gi
+      cpu: 4
+
+  llamaStack:
+    requests:
+      memory: 4Gi
+      cpu: 2
+    limits:
+      memory: 8Gi
+      cpu: 4
+
+  postgresql:
+    requests:
+      memory: 8Gi
+      cpu: 2
+    limits:
+      memory: 16Gi
+      cpu: 4
+
+  redis:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  amq:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  frontend:
+    requests:
+      memory: 512Mi
+      cpu: 500m
+    limits:
+      memory: 1Gi
+      cpu: 1
+
+# Storage
+storage:
+  postgresql:
+    size: 100Gi
+    storageClass: gp3
+
+  amq:
+    size: 10Gi
+    storageClass: gp3
+
+# External LLM configuration
+externalLLM:
+  url: "https://llm.university.edu/v1"
+  apiKey: "changeme"
+  safetyUrl: "https://llm.university.edu/safety/v1"
+  safetyApiKey: "changeme"
+
+# Application credentials
+auth:
+  adminUsername: "admin"
+  adminPassword: "changeme123"
+  adminEmail: "admin@university.edu"
+  jwtSecret: "your-random-jwt-secret-here-min-32-chars"
+  sessionSecret: "your-random-session-secret-here-min-32-chars"
+
+# Database credentials
+database:
+  username: "qaroot"
+  password: "changeme"
+  database: "qaroot_mvp"
+
+# AMQ credentials
+amq:
+  username: "admin"
+  password: "changeme"
+
+# CORS settings
+cors:
+  origin: "https://qaroot.university.edu"
+
+# File upload settings
+fileUpload:
+  path: "/var/qaroot/uploads"
+  maxSize: "50MB"
+
+# Worker settings
+worker:
+  concurrency: 4
+  aggregationInterval: "30s"
+  llmTimeout: "60s"
+  maxRetries: 3
+
+# Llama Stack configuration
+llamaStack:
+  embeddings:
+    model: "nomic-ai/nomic-embed-text-v1.5"
+    dimension: 768
+
+  rag:
+    topK: 5
+    similarityThreshold: 0.7
+    chunkSize: 512
+    chunkOverlap: 50
+
+  inference:
+    model: "qwen2.5-14b-instruct"
+    temperature: 0.7
+    maxTokens: 2048
+
+  safety:
+    model: "llama-guard-3"
+    enablePromptGuard: true
+    enableOutputGuard: true
+
+# OpenShift routes
+routes:
+  apiService:
+    enabled: true
+    host: "api.qaroot.university.edu"
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+  websocketService:
+    enabled: true
+    host: "ws.qaroot.university.edu"
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+  frontend:
+    enabled: true
+    host: "qaroot.university.edu"
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+```
+
+### 6.3 Helm Installation Commands
+
+**Install chart:**
+```bash
+# Create namespace
+oc create namespace qaroot-mvp
+
+# Install with default values
+helm install qaroot ./qaroot -n qaroot-mvp
+
+# Install with custom values file
+helm install qaroot ./qaroot -n qaroot-mvp -f values-production.yaml
+
+# Install with inline overrides
+helm install qaroot ./qaroot -n qaroot-mvp \
+  --set externalLLM.url=https://llm.example.com/v1 \
+  --set auth.adminPassword=securepassword123
+```
+
+**Upgrade chart:**
+```bash
+# Upgrade with new values
+helm upgrade qaroot ./qaroot -n qaroot-mvp -f values-production.yaml
+
+# Upgrade with inline overrides
+helm upgrade qaroot ./qaroot -n qaroot-mvp \
+  --set images.apiService.tag=v1.2.0
+```
+
+**Uninstall chart:**
+```bash
+helm uninstall qaroot -n qaroot-mvp
+```
+
+**Dry run (template validation):**
+```bash
+helm install qaroot ./qaroot -n qaroot-mvp --dry-run --debug
+```
+
+### 6.4 Key Helm Features
+
+**Templating Benefits:**
+- Single source of truth for all Kubernetes resources
+- Environment-specific configuration via values files
+- Automated secret generation from values
+- Consistent labeling and naming conventions
+- Easy rollback to previous versions
+
+**Configuration Management:**
+- All secrets managed through Helm values (encrypted with tools like helm-secrets or sealed-secrets)
+- ConfigMaps generated from templates
+- Resource limits configurable per environment
+- Replica counts adjustable per environment
+
+**Deployment Flexibility:**
+- Deploy to dev/staging/production with different values files
+- Override individual values via `--set` flags
+- Supports Helm hooks for pre/post-install tasks (e.g., database migrations)
+
+---
+
+## 7. Implementation Checklist
+
+### Foundation
 - [ ] OpenShift namespace setup (`qaroot-mvp`)
 - [ ] Deploy PostgreSQL + pgvector
 - [ ] Deploy Redis
@@ -1018,7 +1367,7 @@ EXTERNAL_SAFETY_API_KEY=safety-api-key-here
 - [ ] Seed admin user from Secret
 - [ ] Frontend scaffolding (React + Vite)
 
-### Month 2: RAG & LLM Integration
+### RAG & LLM Integration
 - [ ] Document upload API (PDF, PPTX, DOCX parsing)
 - [ ] Document chunking service (512 tokens)
 - [ ] Deploy Llama Stack with external LLM config
@@ -1030,8 +1379,8 @@ EXTERNAL_SAFETY_API_KEY=safety-api-key-here
 - [ ] Implement Answer Generation Agent
 - [ ] Test end-to-end FAQ pipeline
 
-### Month 3: Frontend & Testing
-- [ ] Host dashboard (quiz sets, sessions)
+### Frontend & Testing
+- [ ] Host dashboard (document collections, sessions)
 - [ ] Document management page (upload, list, status)
 - [ ] Session lobby (QR code, participant feed)
 - [ ] Live FAQ session page (question queue, answer review)
@@ -1042,8 +1391,32 @@ EXTERNAL_SAFETY_API_KEY=safety-api-key-here
 - [ ] Load testing (100 concurrent users)
 - [ ] RAG quality testing (80%+ relevance)
 - [ ] Safety testing (100% blocking)
-- [ ] Production deployment
-- [ ] Documentation
+
+### Deployment & Helm Charts
+- [ ] Create Helm chart structure (`helm create qaroot`)
+- [ ] Create `values.yaml` with all configurable parameters
+- [ ] Create Helm templates for all services
+  - [ ] PostgreSQL StatefulSet template
+  - [ ] Redis Deployment template
+  - [ ] Red Hat AMQ Deployment template
+  - [ ] Llama Stack Deployment template
+  - [ ] API Service Deployment template
+  - [ ] WebSocket Service Deployment template
+  - [ ] FAQ Worker Pool Deployment template
+  - [ ] Frontend Deployment template
+- [ ] Create Helm templates for ConfigMaps and Secrets
+  - [ ] `llama-stack-config` ConfigMap template
+  - [ ] `app-credentials` Secret template
+  - [ ] `llm-credentials` Secret template
+  - [ ] `postgres-credentials` Secret template
+  - [ ] `amq-credentials` Secret template
+- [ ] Create Helm templates for Services
+- [ ] Create Helm templates for PersistentVolumeClaims
+- [ ] Create Helm templates for OpenShift Routes (Ingress)
+- [ ] Test Helm chart deployment (`helm install qaroot ./qaroot`)
+- [ ] Document Helm chart usage in README
+- [ ] Production deployment via Helm
+- [ ] User documentation
 
 ---
 
