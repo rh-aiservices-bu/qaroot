@@ -7,15 +7,31 @@
 
 ## 1. Executive Summary
 
-Qaroot is an open-source, agentic quiz platform designed for university professors and teaching assistants to enhance AI-enabled academic pedagogy. The platform supports real-time assessments, sentiment polling, and automated FAQ generation through LLM integration, scaling from 5 to 5,000 concurrent users.
+Qaroot is an open-source, AI-assisted platform designed for university professors and teaching assistants to enhance live presentations and lectures. The platform supports real-time question collection, AI-powered question clustering and analysis, as well as future modes for timed quizzes and sentiment polling. The system scales from 5 to 5,000 concurrent users.
 
 ### 1.1 Key Objectives
 
 - Deploy scalable, microservices-based architecture on OpenShift
-- Support three pedagogical interaction modes: Timed Quiz, Polling, and Live FAQ Builder
-- Integrate LLM pipeline for automated FAQ generation and knowledge gap analysis
-- Provide Kahoot-like user experience with enhanced academic features
+- **MVP Phase**: Support question aggregation with AI-assisted analysis for live presentations
+- **Future Phases**: Add timed quiz mode, polling, and enhanced analytics
+- Integrate LLM for question clustering, summarization, and host chat assistance
+- Provide intuitive user experience for both presenters and audience
 - Maintain comprehensive audit trails for pedagogical research
+
+### 1.2 MVP vs Future Scope
+
+**MVP (Phase 1): Question Aggregation Tool**
+- Timed question collection (e.g., 60 seconds)
+- AI-powered question clustering and grouping
+- AI chat interface for host to analyze questions
+- Host manually answers questions orally (not auto-generated)
+- Focus: Help presenters identify common themes in audience questions
+
+**Future (Phase 2+):**
+- Timed quiz mode with leaderboards
+- Polling and sentiment analysis
+- Optional RAG-based answer suggestions (if course materials provided)
+- Advanced analytics and longitudinal data
 
 ---
 
@@ -77,84 +93,71 @@ Qaroot is an open-source, agentic quiz platform designed for university professo
                               └──────────────┘
 ```
 
-### 2.2 FAQ Agent Architecture
+### 2.2 Question Analysis Architecture (MVP)
 
-The FAQ answering system uses a **worker pool of specialized agents** that coordinate via Red Hat AMQ and integrate with Llama Stack for AI capabilities.
+The **MVP** focuses on question aggregation and AI-assisted analysis, NOT auto-answering. The system uses a worker pool to cluster questions and provide chat-based analysis for the host.
 
-#### 2.2.1 Agent Services Overview
-
-**FAQ Agent Worker Pool** is a Node.js/TypeScript service that runs multiple concurrent workers, each executing one of four specialized agent types. These agents communicate via Red Hat AMQ message queues and leverage Llama Stack for LLM operations.
+#### 2.2.1 MVP Question Processing Flow
 
 ```
-FAQ Service (API) → Publishes to Red Hat AMQ
+Host starts question collection (60s timer)
+                    ↓
+Audience submits questions → WebSocket → PostgreSQL
+                    ↓
+Host clicks "Analyze Questions"
                     ↓
     ┌───────────────┴───────────────┐
-    │   FAQ Agent Worker Pool       │
-    │  (Multiple Pods/Replicas)     │
+    │  Question Analysis Worker     │
+    │  (Background processing)      │
     │                               │
-    │  Workers consume from queues: │
-    │  - faq.aggregate.queue        │
-    │  - faq.llm.queue              │
-    │  - faq.answer.queue           │
-    │  - faq.analysis.queue         │
+    │  1. Generate embeddings       │
+    │  2. Cluster similar questions │
+    │  3. Return clusters to host   │
     └───────────────┬───────────────┘
                     ↓
             Llama Stack API
-         (Inference + RAG + Safety)
+         (Embeddings + Inference)
+                    ↓
+Host interface: Clustered questions + AI Chat
+    - "What are the main topics?"
+    - "Rephrase the most common question"
+    - "Summarize cluster #3"
+                    ↓
+Host answers questions orally (not AI-generated)
 ```
 
-#### 2.2.2 Agent Responsibilities
+#### 2.2.2 MVP Agent Responsibilities
 
-**1. FAQ Aggregation Agent**
-- **Trigger**: Scheduled cron (every 30-60 seconds) or event-based
+**1. Question Clustering Agent** (MVP)
+- **Trigger**: On-demand when host clicks "Analyze Questions"
 - **Process**:
-  1. Fetches new unprocessed FAQ questions from PostgreSQL
-  2. Calls **Llama Stack Embeddings API** to generate embeddings for each question
-  3. Stores embeddings in pgvector (faq_questions.embedding column)
-  4. Performs vector similarity search in pgvector to find similar questions
+  1. Fetches all questions from current session
+  2. Calls **Llama Stack Embeddings API** to generate embeddings
+  3. Stores embeddings in pgvector (questions.embedding column)
+  4. Performs vector similarity search using pgvector
   5. Clusters questions with cosine similarity > 0.85
-  6. Selects representative "master question" for each cluster
-  7. Publishes `faq.cluster.created` event to Red Hat AMQ
-- **Output**: Master questions ready for answer generation
+  6. Creates `question_clusters` records with representative questions
+  7. Returns clustered results to host interface
+- **Output**: Grouped questions by topic/theme
 - **Llama Stack API Used**: `embeddings.create()` for question embeddings
 
-**2. LLM Processing Agent**
-- **Trigger**: Consumes `faq.cluster.created` messages from Red Hat AMQ
+**2. Host Chat Agent** (MVP)
+- **Trigger**: Host sends chat message asking about questions
 - **Process**:
-  1. Receives master question and cluster metadata
-  2. Calls **Llama Stack Inference API** with:
-     - Model: Qwen2.5-14B-Instruct (via vLLM)
-     - RAG enabled: retrieves relevant course documents from pgvector
-     - Safety enabled: Llama Guard 3 filters inputs/outputs (via vLLM)
-  3. Implements retry logic (3 attempts with exponential backoff)
-  4. Streams response tokens as they're generated
-  5. Publishes `faq.llm.completed` to Red Hat AMQ (with raw answer)
-- **Output**: Raw LLM-generated answer text
-- **Llama Stack API Used**: `inference.chatCompletion()` with RAG + Safety
-- **Note**: Llama Stack routes requests to separate vLLM services
+  1. Receives host query (e.g., "What are the main topics?")
+  2. Retrieves question clusters and original questions from DB
+  3. Calls **Llama Stack Inference API** with context:
+     - Prompt: System prompt explaining host is analyzing audience questions
+     - Context: Question text, cluster info, submission times
+     - Model: Qwen2.5-14B-Instruct (external LLM)
+  4. Streams response back to host chat interface
+  5. Stores chat history in `host_chat_messages` table
+- **Output**: AI-generated summaries, rephrased questions, topic analysis
+- **Llama Stack API Used**: `inference.chatCompletion()` for analysis
 
-**3. Answer Generation Agent**
-- **Trigger**: Receives raw LLM answer from LLM Processing Agent
-- **Process**:
-  1. Post-processes LLM output for pedagogical quality
-  2. Extracts citations from RAG-retrieved documents
-  3. **Optional**: Calls **Llama Stack Inference API** for answer refinement:
-     - Reformat citations to academic style
-     - Add executive summary if answer is long
-     - Simplify complex language for student comprehension
-  4. Applies additional content filters (profanity check)
-  5. Validates answer length (50-2000 chars)
-  6. Stores in `faq_master_questions` table with `is_published=false`
-  7. Publishes `faq.answer.generated` event to WebSocket Hub
-- **Output**: Polished, citation-formatted answer ready for host review
-- **Llama Stack API Used**: Optionally `inference.chatCompletion()` for post-processing refinement
-
-**4. Knowledge Gap Analysis Agent**
-- **Trigger**: End of session or scheduled batch (nightly)
-- **Process**:
-  1. Analyzes all FAQ questions from session or time period
-  2. Identifies recurring topics using embedding clustering
-  3. Calls **Llama Stack Memory API** to track historical patterns
+**3. Future: Knowledge Gap Analysis Agent** (Phase 2+)
+- **Trigger**: End of session or scheduled batch
+- **Process**: TBD - analyze recurring topics across multiple sessions
   4. Compares current session themes vs. historical data (TimescaleDB)
   5. Generates insights: "20% of questions about Recursion vs. 5% historically"
   6. Stores insights in `session_archives` and TimescaleDB
@@ -2767,78 +2770,91 @@ Security Tests:
 
 ## 12. Roadmap & Future Enhancements
 
-### Phase 1: MVP (FAQ Mode with Llama Stack) - 3 Months
-**Core Focus**: Demonstrate AI-powered FAQ answering with RAG
+### Phase 1: MVP (Question Aggregation & AI Analysis) - 3 Months
+**Core Focus**: Question collection, AI-powered clustering, and host chat analysis
+
+**Key Differentiator**: This is NOT an auto-answering chatbot. The AI helps the host understand and group audience questions - the host answers orally.
 
 - [x] Core architecture design (this document)
 - [ ] **Infrastructure Setup**
   - [ ] OpenShift cluster setup (CPU-only nodes, no GPU required)
   - [ ] Deploy PostgreSQL with pgvector extension
   - [ ] Deploy Redis for caching
-  - [ ] Deploy Red Hat AMQ
+  - [ ] Deploy Red Hat AMQ (optional for MVP, can use direct DB)
   - [ ] Obtain credentials for external LLM service
 
 - [ ] **Llama Stack Configuration**
   - [ ] Create Kubernetes Secret with external LLM credentials
-  - [ ] Deploy Llama Stack orchestration layer (2 replicas)
+  - [ ] Deploy Llama Stack orchestration layer (1 replica MVP)
   - [ ] Configure Llama Stack to connect to external LLM service
-  - [ ] Configure Llama Stack to connect to external safety service
-  - [ ] Test embeddings generation (nomic-embed-text or external)
-  - [ ] Test RAG retrieval from pgvector
+  - [ ] Test embeddings generation (nomic-embed-text-v1.5)
+  - [ ] Test vector similarity search with pgvector
 
 - [ ] **Authentication & User Management**
-  - [ ] OIDC authentication (university SSO)
+  - [ ] Basic auth (username/password from OpenShift Secret)
   - [ ] User roles: Host, Admin
-  - [ ] Basic user profile management
+  - [ ] Seed admin user from Secret
 
-- [ ] **RAG Document Management**
-  - [ ] Document upload API (PDF, PPTX, DOCX)
-  - [ ] Document chunking service (512 token chunks)
-  - [ ] Embedding generation via Llama Stack
-  - [ ] Storage in rag_documents and rag_document_chunks tables
-  - [ ] Document management UI for hosts
+- [ ] **Question Collection Core Features**
+  - [ ] Session creation with configurable timer (default 60s)
+  - [ ] Real-time question submission via WebSocket
+  - [ ] Anonymous participation (optional nickname)
+  - [ ] Collection timer countdown (broadcast to all)
+  - [ ] Question counter updates in real-time
 
-- [ ] **FAQ Mode Core Features**
-  - [ ] Session creation (FAQ-only mode)
-  - [ ] Real-time FAQ question submission (WebSocket)
-  - [ ] FAQ Worker Pool deployment
-    - [ ] Aggregation Agent (clustering similar questions)
-    - [ ] LLM Processing Agent (RAG-enhanced answer generation)
-    - [ ] Answer Generation Agent (formatting & citations)
-  - [ ] Host review interface for FAQ answers
-  - [ ] Publish/unpublish FAQ answers
-  - [ ] Upvote/downvote functionality
+- [ ] **Question Analysis Worker**
+  - [ ] On-demand clustering when host clicks "Analyze"
+  - [ ] Embedding generation for all questions
+  - [ ] Cosine similarity clustering (threshold > 0.85)
+  - [ ] Store clusters in `question_clusters` table
+  - [ ] Return results to host interface
 
-- [ ] **Host Interface (FAQ Focus)**
+- [ ] **Host Interface**
   - [ ] Dashboard with session list
-  - [ ] Document upload and management
-  - [ ] Session lobby with QR code
-  - [ ] Live FAQ queue (incoming questions)
-  - [ ] FAQ answer review panel
-  - [ ] Published FAQ display
+  - [ ] Session creation (title, timer duration)
+  - [ ] Session lobby with QR code and PIN
+  - [ ] "Start Collection" and "Stop Collection" buttons
+  - [ ] Live question count display
+  - [ ] "Analyze Questions" button (after collection ends)
+  - [ ] Clustered question view (expandable groups)
+  - [ ] AI chat interface for analysis
+    - Chat input: "What are the main topics?"
+    - AI response: Streaming text responses
+    - Chat history preservation per session
 
-- [ ] **Participant Interface (Minimal)**
+- [ ] **Participant Interface**
   - [ ] Join session via PIN or QR code
-  - [ ] Submit FAQ questions
-  - [ ] View published FAQ answers
-  - [ ] Upvote/downvote answers
+  - [ ] Submit question (text input, character limit 500)
+  - [ ] Confirmation message after submission
+  - [ ] Collection timer display
+
+- [ ] **Helm Chart Deployment**
+  - [ ] Create Helm chart structure
+  - [ ] Create values.yaml with all config parameters
+  - [ ] Create templates for all services
+  - [ ] Test deployment via `helm install`
 
 - [ ] **Testing & Validation**
-  - [ ] Test RAG quality with sample course materials
-  - [ ] Validate Llama Guard safety filtering
-  - [ ] Load test: 100 concurrent participants, 50 questions/session
+  - [ ] Test question clustering accuracy (80%+ similar questions grouped)
+  - [ ] Test AI chat responses for quality
+  - [ ] Load test: 100 concurrent participants, 50 questions in 60 seconds
   - [ ] End-to-end integration testing
 
 **Success Criteria**:
-- ✅ Host can upload course documents and see them processed
-- ✅ Students can submit questions and see AI-generated answers within 60 seconds
-- ✅ Answers cite source documents with 80%+ relevance
-- ✅ Llama Guard blocks 100% of test unsafe content
-- ✅ System handles 100 concurrent users
+- ✅ Host can create session and start 60-second collection
+- ✅ 100 participants can submit questions concurrently
+- ✅ AI clusters similar questions with 80%+ accuracy
+- ✅ Host can query AI about question themes within 10 seconds
+- ✅ System remains responsive under load
 
 ---
 
-### Phase 2: Quiz Mode & Enhanced Analytics - 2 Months
+### Phase 2: Enhanced Question Features & Quiz Mode - 2 Months
+- [ ] **Optional RAG-based answer suggestions**
+  - [ ] Document upload (PDF, PPTX, DOCX)
+  - [ ] Document chunking and embedding
+  - [ ] RAG retrieval for suggested answers
+  - [ ] Host can view suggested answers (still answers orally)
 - [ ] Quiz builder (multiple choice, true/false, type answer)
 - [ ] Real-time quiz mode with leaderboard
 - [ ] Participant scoring and rankings

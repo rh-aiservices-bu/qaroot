@@ -8,27 +8,157 @@
 
 ## Executive Summary
 
-This MVP implements **AI-powered FAQ answering** with Retrieval-Augmented Generation (RAG). Professors run live Q&A sessions where student questions are automatically answered using course materials.
+This MVP implements an **AI-powered question aggregation and analysis tool** for live presentations. Presenters collect audience questions, then use AI to cluster, summarize, and rephrase them - making it easier to identify common themes and answer efficiently.
+
+**Key Difference from Traditional FAQ Bots:**
+- This is **NOT a RAG chatbot** that auto-answers questions from documents
+- AI **clusters and summarizes** audience questions
+- **Presenter manually answers** questions orally
+- Optional: AI can analyze open-ended responses (e.g., "what features did you remember?")
 
 **MVP Scope:**
-- FAQ session mode only (no quiz or polling)
-- Document upload and RAG processing
-- AI-powered FAQ answer generation via Llama Stack
-- Host review and publish workflow
+- Question collection mode (timed sessions, e.g., 60 seconds)
+- Real-time question submission from audience (anonymous)
+- AI-powered question clustering and grouping
+- AI-driven summarization and rephrasing of common questions
+- Host interface for AI-assisted analysis
+- Chat interface for host to query AI about collected questions
 - Real-time WebSocket communication
 - Basic authentication (username/password in OpenShift Secret)
 
 **Success Criteria:**
-- ✅ Answer generation within 60 seconds
-- ✅ 80%+ citation relevance
-- ✅ 100% safety filtering
-- ✅ 100 concurrent users per session
+- ✅ Collect questions from 100 concurrent users in 60 seconds
+- ✅ Cluster similar questions with 80%+ accuracy
+- ✅ AI summarization within 10 seconds
+- ✅ Host can query AI about question themes/topics
 
 ---
 
-## 1. System Architecture
+## 1. User Interaction Flows & Data Flow
 
-### 1.1 High-Level Architecture
+### 1.1 Host User Journey
+
+**Phase 1: Setup (30 seconds)**
+```
+1. Host logs in → Dashboard
+2. Host clicks "Create Session" → Form (title, timer duration)
+3. POST /api/v1/sessions → Returns PIN + QR code
+4. Host lands on Session Lobby → Shows QR, PIN, participant counter
+```
+
+**Phase 2: Collection (60 seconds)**
+```
+5. Participants join → Counter updates in real-time
+6. Host clicks "Start Collection" → Timer starts (60s countdown)
+7. Questions stream in → Host sees live feed + counter
+8. Timer ends → Collection stops, "Analyze" button appears
+```
+
+**Phase 3: Analysis (10-30 seconds)**
+```
+9. Host clicks "Analyze Questions" → Worker processes in background
+   - Generate embeddings for all questions
+   - Cluster by similarity (cosine > 0.85)
+   - Generate representative question per cluster
+10. Host sees clustered view → 8 groups of questions
+```
+
+**Phase 4: AI-Assisted Review (5-10 minutes)**
+```
+11. Host expands clusters → Reviews similar questions grouped together
+12. Host uses AI chat:
+    - "What are the main topics ranked by frequency?"
+    - "Rephrase the most common question in Cluster 1"
+    - AI streams responses based on collected questions
+13. Host answers questions orally to audience
+14. (Optional) Host reopens collection for next topic
+```
+
+**Data Flow: Question Submission**
+```
+Participant Browser
+    │ WebSocket: question:submit
+    │ { sessionId, questionText }
+    ▼
+WebSocket Service (Node.js)
+    │ Validates session is active
+    │ Validates text length < 500 chars
+    ▼
+PostgreSQL
+    │ INSERT INTO questions
+    │   (session_id, question_text, submitted_at)
+    │ Returns question_id
+    ▼
+WebSocket Service
+    │ Broadcast to host: question:new
+    │ { questionId, text, submittedAt }
+    ▼
+Host Browser
+    │ Updates question counter
+    │ Appends to question feed
+```
+
+**Data Flow: AI Clustering**
+```
+Host clicks "Analyze"
+    ▼
+API Service
+    │ POST /api/v1/sessions/{id}/analyze
+    │ Publishes to AMQ: analyze.questions
+    │ Returns 202 Accepted
+    ▼
+Question Analysis Worker
+    │ 1. SELECT * FROM questions WHERE session_id = ?
+    │ 2. For each question:
+    │      POST /llama-stack/embeddings → 768-dim vector
+    │      UPDATE questions SET embedding = ?
+    │ 3. Pgvector similarity search:
+    │      SELECT q1.id, q2.id, (q1.embedding <=> q2.embedding)
+    │      WHERE distance < 0.15
+    │ 4. Group into clusters (similarity > 0.85)
+    │ 5. For each cluster:
+    │      INSERT INTO question_clusters
+    │      POST /llama-stack/inference (rephrase questions)
+    │      UPDATE question_clusters SET representative_question = ?
+    ▼
+WebSocket Service
+    │ Broadcast: analysis:complete { clusterCount }
+    ▼
+Host Browser
+    │ Displays clustered view
+```
+
+### 1.2 Participant User Journey
+
+**Phase 1: Join (5 seconds)**
+```
+1. Scan QR code or type URL → https://qaroot.edu/join/ABC123
+2. GET /join/ABC123 → Returns session info
+3. (Optional) Enter nickname → POST /participants
+4. WebSocket connect → Waits for collection to start
+```
+
+**Phase 2: Submit (During 60s window)**
+```
+5. Collection starts → Timer appears, input enabled
+6. Type question → Character counter shows 0/500
+7. Click "Submit" → WebSocket sends question
+8. See confirmation → "Question submitted!"
+9. Can submit additional questions (5s cooldown between submissions)
+```
+
+**Phase 3: Wait**
+```
+10. Timer ends → Input disabled
+11. See message: "Collection ended. Thank you!"
+12. (Presenter answers questions orally - no UI updates needed)
+```
+
+---
+
+## 2. System Architecture
+
+### 2.1 High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -82,57 +212,61 @@ This MVP implements **AI-powered FAQ answering** with Retrieval-Augmented Genera
                               └──────────────┘
 ```
 
-### 1.2 FAQ Processing Pipeline
+### 1.2 Question Collection & Analysis Pipeline
 
 ```
-Student submits question
+Presenter starts question collection (60 second timer)
     ↓
-WebSocket receives → stores in DB
+Audience submits questions via WebSocket
     ↓
-FAQ Aggregation Agent (scheduled every 30s)
-    ├─ Generate embeddings (Llama Stack)
-    ├─ Cluster similar questions (pgvector)
-    └─ Publish to AMQ: faq.cluster.created
+Questions stored in DB + embeddings generated
+    ↓
+Collection timer ends
+    ↓
+Presenter clicks "Analyze Questions"
+    ↓
+AI Clustering Agent
+    ├─ Generate embeddings for all questions (Llama Stack)
+    ├─ Cluster similar questions using cosine similarity (pgvector)
+    ├─ Group questions by topic/theme
+    └─ Return clusters to host interface
          ↓
-LLM Processing Agent (consumes AMQ)
-    ├─ Retrieve relevant documents (RAG via Llama Stack)
-    ├─ Generate answer (Qwen2.5-14B via external LLM)
-    ├─ Safety check (Llama Guard via external service)
-    └─ Publish to AMQ: faq.llm.completed
+Presenter views clustered questions + uses AI chat
+    ├─ "Summarize the main topics, ranked by frequency"
+    ├─ "What is the most common question?"
+    ├─ "Rephrase this cluster's question"
+    └─ AI responds via LLM (Qwen2.5-14B)
          ↓
-Answer Generation Agent (consumes AMQ)
-    ├─ Format answer with citations
-    ├─ Post-process for readability
-    └─ Store in DB (is_published=false)
-         ↓
-WebSocket notifies host → Host reviews → Host publishes
-         ↓
-WebSocket broadcasts → Students see answer
+Presenter answers questions orally
+    ↓
+Optional: Presenter reopens question collector for next topic
 ```
 
 ### 1.3 Service Responsibilities
 
 **API Service** (Node.js + Express)
 - Basic authentication (username/password)
-- Document upload and parsing
-- Session CRUD operations
+- Session CRUD operations (create, start/stop collection timer)
+- Question CRUD operations
+- Chat API for host-AI interaction
 - RESTful endpoints for host/participant
 
 **WebSocket Service** (Node.js + Socket.io)
-- Real-time FAQ question submission
-- Host notifications for new questions/answers
-- Published answer broadcasting
+- Real-time question submission (audience → DB)
+- Live question count updates to host
+- Collection timer synchronization
 - Redis pub/sub for multi-pod coordination
 
-**FAQ Worker Pool** (Node.js + Bull)
-- **Aggregation Agent**: Question clustering via embeddings
-- **LLM Processing Agent**: RAG retrieval + answer generation
-- **Answer Generation Agent**: Citation formatting + post-processing
+**Question Analysis Worker** (Node.js + Bull)
+- **Clustering Agent**: Groups similar questions using embeddings + cosine similarity
+- **Summarization Agent**: Generates topic summaries and rephrased questions via LLM
+- Triggered on-demand when host clicks "Analyze Questions"
 
 **Llama Stack** (Python)
-- Unified API for inference, embeddings, RAG, safety
+- Embeddings API (nomic-embed-text-v1.5, 768 dimensions)
+- Inference API for chat responses and summarization (Qwen2.5-14B)
 - Connects to external LLM service (OpenAI-compatible)
-- Manages pgvector integration for RAG retrieval
+- Vector similarity search via pgvector
 
 ---
 
@@ -140,7 +274,8 @@ WebSocket broadcasts → Students see answer
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
-| **Frontend** | React + TypeScript | 18.x |
+| **Frontend Framework** | React + TypeScript | 18.x |
+| **UI Component Library** | PatternFly 6 | 6.x |
 | **Backend** | Node.js + TypeScript | 20.x |
 | **API Framework** | Express.js | 4.x |
 | **Real-time** | Socket.io | 4.x |
@@ -154,11 +289,15 @@ WebSocket broadcasts → Students see answer
 ### 2.1 AI/LLM Configuration
 
 - **Inference Provider**: External LLM service (Qwen2.5-14B-Instruct)
-- **Safety Provider**: External safety service (Llama Guard 3 compatible)
 - **Embeddings Model**: nomic-embed-text-v1.5 (768 dimensions, local in Llama Stack)
 - **Vector Store**: pgvector with IVFFlat indexing
-- **RAG Strategy**: Top-5 chunks, cosine similarity > 0.7
-- **Chunking**: 512 tokens with 50 token overlap
+- **Clustering Strategy**: Cosine similarity > 0.85 for question grouping
+- **Use Cases**:
+  - Question embedding generation
+  - Question clustering/grouping
+  - Topic summarization
+  - Question rephrasing
+  - Host chat queries (e.g., "what are the main topics?")
 
 ---
 
@@ -193,9 +332,11 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 ```
 
-#### Document Collections
+#### Presentation Collections (Optional - Future)
 ```sql
-CREATE TABLE document_collections (
+-- MVP: Not needed - sessions are standalone
+-- Future: Group related sessions by presentation/course
+CREATE TABLE presentation_collections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
@@ -205,7 +346,7 @@ CREATE TABLE document_collections (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_collections_owner ON document_collections(owner_id);
+CREATE INDEX idx_collections_owner ON presentation_collections(owner_id);
 ```
 
 #### Sessions
@@ -214,21 +355,23 @@ CREATE TYPE session_status AS ENUM ('waiting', 'active', 'paused', 'completed');
 
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    collection_id UUID REFERENCES document_collections(id) ON DELETE SET NULL,
     host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
     session_pin VARCHAR(8) UNIQUE NOT NULL,
     session_status session_status DEFAULT 'waiting',
+    collection_timer_duration INTEGER DEFAULT 60, -- seconds
+    collection_started_at TIMESTAMP WITH TIME ZONE,
+    collection_ended_at TIMESTAMP WITH TIME ZONE,
     actual_start TIMESTAMP WITH TIME ZONE,
     ended_at TIMESTAMP WITH TIME ZONE,
     settings JSONB,
     participant_count INTEGER DEFAULT 0,
+    question_count INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX idx_sessions_host ON sessions(host_id);
-CREATE INDEX idx_sessions_collection ON sessions(collection_id);
 CREATE INDEX idx_sessions_pin ON sessions(session_pin);
 CREATE INDEX idx_sessions_status ON sessions(session_status);
 ```
@@ -249,95 +392,53 @@ CREATE TABLE participants (
 CREATE INDEX idx_participants_session ON participants(session_id);
 ```
 
-### 3.3 FAQ Tables
+### 3.3 Question Tables
 
-#### FAQ Questions
+#### Questions
 ```sql
-CREATE TABLE faq_questions (
+CREATE TABLE questions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+    participant_id UUID REFERENCES participants(id) ON DELETE SET NULL, -- nullable for anonymous
     question_text TEXT NOT NULL,
-    embedding vector(768),
-    cluster_id UUID,
-    is_processed BOOLEAN DEFAULT FALSE,
+    embedding vector(768), -- generated after submission
+    cluster_id UUID, -- assigned after clustering
     submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_faq_session ON faq_questions(session_id);
-CREATE INDEX idx_faq_cluster ON faq_questions(cluster_id);
-CREATE INDEX idx_faq_embedding ON faq_questions USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX idx_questions_session ON questions(session_id);
+CREATE INDEX idx_questions_cluster ON questions(cluster_id);
+CREATE INDEX idx_questions_embedding ON questions USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX idx_questions_submitted ON questions(submitted_at);
 ```
 
-#### FAQ Master Questions (Clustered + Answered)
+#### Question Clusters
 ```sql
-CREATE TABLE faq_master_questions (
+CREATE TABLE question_clusters (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    cluster_id UUID UNIQUE NOT NULL,
-    master_question TEXT NOT NULL,
-    source_question_ids UUID[] NOT NULL,
-    generated_answer TEXT,
-    citations JSONB,
-    upvotes INTEGER DEFAULT 0,
-    downvotes INTEGER DEFAULT 0,
-    is_published BOOLEAN DEFAULT FALSE,
-    published_at TIMESTAMP WITH TIME ZONE,
-    generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    llm_model VARCHAR(100),
-    processing_time_ms INTEGER
+    cluster_label VARCHAR(255), -- e.g., "Migration Questions", "Feature Requests"
+    representative_question TEXT, -- AI-generated rephrased question
+    question_count INTEGER DEFAULT 0,
+    centroid_embedding vector(768), -- cluster center for similarity
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_master_session ON faq_master_questions(session_id);
-CREATE INDEX idx_master_published ON faq_master_questions(is_published, session_id);
+CREATE INDEX idx_clusters_session ON question_clusters(session_id);
 ```
 
-### 3.4 RAG Document Tables
-
-#### RAG Documents
+#### Host Chat Messages
 ```sql
-CREATE TYPE document_type AS ENUM (
-    'lecture_slides',
-    'lecture_notes',
-    'syllabus',
-    'reading',
-    'textbook_excerpt',
-    'supplementary'
-);
-
-CREATE TABLE rag_documents (
+-- Chat between host and AI for question analysis
+CREATE TABLE host_chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    collection_id UUID REFERENCES document_collections(id) ON DELETE CASCADE,
-    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    document_type document_type NOT NULL,
-    title VARCHAR(500) NOT NULL,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
-    metadata JSONB,
-    file_url VARCHAR(1000),
-    embedding vector(768),
-    uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_rag_collection ON rag_documents(collection_id);
-CREATE INDEX idx_rag_owner ON rag_documents(owner_id);
-CREATE INDEX idx_rag_embedding ON rag_documents USING ivfflat (embedding vector_cosine_ops);
-```
-
-#### RAG Document Chunks
-```sql
-CREATE TABLE rag_document_chunks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id UUID NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    embedding vector(768) NOT NULL,
-    metadata JSONB,
-    UNIQUE(document_id, chunk_index)
-);
-
-CREATE INDEX idx_chunk_document ON rag_document_chunks(document_id);
-CREATE INDEX idx_chunk_embedding ON rag_document_chunks USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX idx_chat_session ON host_chat_messages(session_id, created_at);
 ```
 
 ---
@@ -382,41 +483,13 @@ data:
         temperature: 0.7
         max_tokens: 2048
 
-    # Safety Provider (External Llama Guard)
-    safety:
-      provider: remote::openai-compatible
-      config:
-        url: ${EXTERNAL_SAFETY_URL}
-        api_key: ${EXTERNAL_SAFETY_API_KEY}
-        model: llama-guard-3
-        enable_prompt_guard: true
-        enable_output_guard: true
-
     # Embeddings Provider (Local in Llama Stack)
     embeddings:
       provider: sentence-transformers
       config:
         model: nomic-ai/nomic-embed-text-v1.5
         dimension: 768
-
-    # RAG/Memory Provider (PostgreSQL + pgvector)
-    memory:
-      provider: pgvector
-      config:
-        connection_string: ${DATABASE_URL}
-        table_name: rag_document_chunks
-        embedding_dimension: 768
-        similarity_metric: cosine
-
-    # RAG Configuration
-    rag:
-      retrieval:
-        top_k: 5
-        similarity_threshold: 0.7
-      chunking:
-        strategy: recursive
-        chunk_size: 512
-        chunk_overlap: 50
+        batch_size: 32
 ```
 
 #### Secret: llm-credentials
@@ -430,8 +503,6 @@ type: Opaque
 stringData:
   llm-url: "https://llm.university.edu/v1"
   llm-api-key: "your-api-key-here"
-  safety-url: "https://llm.university.edu/safety/v1"
-  safety-api-key: "your-safety-api-key-here"
 ```
 
 #### Deployment: llama-stack
@@ -482,16 +553,6 @@ spec:
             secretKeyRef:
               name: llm-credentials
               key: llm-api-key
-        - name: EXTERNAL_SAFETY_URL
-          valueFrom:
-            secretKeyRef:
-              name: llm-credentials
-              key: safety-url
-        - name: EXTERNAL_SAFETY_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: llm-credentials
-              key: safety-api-key
         resources:
           requests:
             memory: 4Gi
@@ -1414,6 +1475,108 @@ helm install qaroot ./qaroot -n qaroot-mvp --dry-run --debug
 - [ ] Document Helm chart usage in README
 - [ ] Production deployment via Helm
 - [ ] User documentation
+
+---
+
+## 8. Frontend Development Guidelines
+
+### 8.1 UI Component Library: PatternFly 6
+
+The MVP uses **PatternFly 6** (Red Hat's open-source design system) for all UI components.
+
+**Why PatternFly 6:**
+- Red Hat's official design system
+- Enterprise-ready, accessible (WCAG 2.1 AA)
+- Consistent with OpenShift console UX
+- Comprehensive component library
+- Built for React + TypeScript
+
+**PatternFly 6 Resources:**
+- Official Docs: https://www.patternfly.org/
+- React Components: https://www.patternfly.org/components/all-components
+- GitHub: https://github.com/patternfly/patternfly-react
+
+**AI Development Guide:**
+- For AI-assisted development with PatternFly 6, reference the LiteMaaS project's CLAUDE.md files:
+  - Main guide: `CLAUDE.md` (general Context7 instructions)
+  - Frontend guide: `frontend/CLAUDE.md` (PatternFly 6 specific instructions)
+  - PatternFly 6 guide: `docs/pf6-guide.md` (comprehensive PF6 patterns)
+- Location: https://github.com/rh-aiservices-bu/LiteMaaS/tree/dev
+
+### 8.2 Key UI Components for MVP
+
+**Host Interface Components:**
+- `Page` + `PageSection` - Layout structure
+- `Card` - Session lobby, clustered questions
+- `Button` - Primary actions (Start Collection, Analyze, Submit)
+- `TextInput` - Session title, chat input
+- `Timer` (custom) - Countdown display
+- `Badge` - Question counter, participant counter
+- `Modal` - Session creation form
+- `ExpandableSection` - Collapsible question clusters
+- `DataList` - Question feed, clustered questions
+- `ChatBot` (custom or use `MessageBox`) - AI chat interface
+- `EmptyState` - No questions collected yet
+- `Spinner` - Loading during analysis
+
+**Participant Interface Components:**
+- `Page` + `PageSection` - Layout
+- `Form` + `FormGroup` - Join session, question input
+- `TextArea` - Question input (500 char limit)
+- `CharacterCounter` (custom) - Shows X/500
+- `Button` - Submit question
+- `Alert` - Success/error messages
+- `Timer` (custom) - Countdown display
+- `EmptyState` - Waiting for collection to start
+
+**Common Components:**
+- `Masthead` - Top navigation (minimal for MVP)
+- `Alert` - Notifications and error messages
+- `Progress` - Analysis progress indicator
+- `Tooltip` - Hints and help text
+
+### 8.3 Color Palette & Theming
+
+PatternFly 6 uses CSS variables for theming. Key colors for MVP:
+
+```css
+/* Primary actions */
+--pf-v6-global--primary-color--100: #0066cc; /* Blue */
+
+/* Success states */
+--pf-v6-global--success-color--100: #3e8635; /* Green */
+
+/* Warning/timer */
+--pf-v6-global--warning-color--100: #f0ab00; /* Orange */
+
+/* Danger/errors */
+--pf-v6-global--danger-color--100: #c9190b; /* Red */
+
+/* Backgrounds */
+--pf-v6-global--BackgroundColor--100: #ffffff; /* White */
+--pf-v6-global--BackgroundColor--200: #f0f0f0; /* Light gray */
+```
+
+### 8.4 Responsive Design
+
+PatternFly 6 is mobile-responsive by default. Key breakpoints:
+
+- **Desktop**: 1200px+ (primary target for host interface)
+- **Tablet**: 768px-1199px
+- **Mobile**: < 768px (primary target for participant interface)
+
+**Host Interface**: Optimized for desktop/laptop (presenter typically uses larger screen)
+**Participant Interface**: Mobile-first (audience uses phones to scan QR and submit)
+
+### 8.5 Accessibility Requirements
+
+- All components must meet **WCAG 2.1 Level AA**
+- Keyboard navigation support (Tab, Enter, Esc)
+- Screen reader compatibility (ARIA labels)
+- Sufficient color contrast (4.5:1 for text)
+- Focus indicators on all interactive elements
+
+PatternFly 6 components include accessibility by default.
 
 ---
 
