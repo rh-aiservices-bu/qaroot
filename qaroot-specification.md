@@ -2,8 +2,6 @@
 
 **Version:** 1.0
 **Date:** October 1, 2025
-**Project Lead:** Philip
-**Project Support:** Guillaume
 
 ---
 
