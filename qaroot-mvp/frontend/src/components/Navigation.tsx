@@ -1,0 +1,58 @@
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Nav, NavList, NavItem } from '@patternfly/react-core';
+
+export default function Navigation() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const isActive = (path: string) => location.pathname === path;
+
+  return (
+    <div style={{
+      width: '250px',
+      backgroundColor: '#151515',
+      height: '100vh',
+      position: 'fixed',
+      left: 0,
+      top: 0,
+      padding: '2rem 0',
+      color: '#fff'
+    }}>
+      <div style={{ padding: '0 1.5rem', marginBottom: '2rem', cursor: 'pointer' }} onClick={() => navigate('/dashboard')}>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0, color: '#fff' }}>
+          QARoot
+        </h1>
+      </div>
+
+      <Nav theme="dark">
+        <NavList>
+          <NavItem
+            isActive={isActive('/dashboard')}
+            onClick={() => navigate('/dashboard')}
+            style={{
+              cursor: 'pointer',
+              padding: '0.75rem 1.5rem',
+              color: isActive('/dashboard') ? '#fff' : '#d2d2d2',
+              backgroundColor: isActive('/dashboard') ? '#0066cc' : 'transparent',
+              borderLeft: isActive('/dashboard') ? '4px solid #fff' : '4px solid transparent'
+            }}
+          >
+            All Sessions
+          </NavItem>
+        </NavList>
+      </Nav>
+
+      <div style={{
+        position: 'absolute',
+        bottom: '2rem',
+        left: 0,
+        right: 0,
+        padding: '0 1.5rem',
+        fontSize: '0.875rem',
+        color: '#8a8d90'
+      }}>
+        <div>Logged in as admin</div>
+      </div>
+    </div>
+  );
+}

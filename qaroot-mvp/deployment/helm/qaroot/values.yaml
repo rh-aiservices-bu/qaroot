@@ -1,0 +1,203 @@
+# Global settings
+global:
+  namespace: qaroot-mvp
+  domain: qaroot.university.edu
+
+# Image settings
+images:
+  apiService:
+    repository: qaroot/api-service
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  websocketService:
+    repository: qaroot/websocket-service
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  faqWorkerPool:
+    repository: qaroot/faq-worker-pool
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  frontend:
+    repository: qaroot/frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  llamaStack:
+    repository: llamastack/distribution
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  postgresql:
+    repository: pgvector/pgvector
+    tag: pg15
+    pullPolicy: IfNotPresent
+
+  redis:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+
+  amq:
+    repository: registry.redhat.io/amq7/amq-broker
+    tag: "7.11"
+    pullPolicy: IfNotPresent
+
+# Replica counts
+replicaCount:
+  apiService: 1
+  websocketService: 1
+  faqWorkerPool: 1
+  llamaStack: 1
+  frontend: 1
+
+# Resource limits
+resources:
+  apiService:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  websocketService:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  faqWorkerPool:
+    requests:
+      memory: 4Gi
+      cpu: 2
+    limits:
+      memory: 8Gi
+      cpu: 4
+
+  llamaStack:
+    requests:
+      memory: 4Gi
+      cpu: 2
+    limits:
+      memory: 8Gi
+      cpu: 4
+
+  postgresql:
+    requests:
+      memory: 8Gi
+      cpu: 2
+    limits:
+      memory: 16Gi
+      cpu: 4
+
+  redis:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  amq:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 4Gi
+      cpu: 2
+
+  frontend:
+    requests:
+      memory: 512Mi
+      cpu: 500m
+    limits:
+      memory: 1Gi
+      cpu: 1
+
+# Storage
+storage:
+  postgresql:
+    size: 100Gi
+    storageClass: gp3
+
+  amq:
+    size: 10Gi
+    storageClass: gp3
+
+# External LLM configuration
+externalLLM:
+  url: "https://llm.university.edu/v1"
+  apiKey: "changeme"
+
+# Application credentials
+auth:
+  adminUsername: "admin"
+  adminPassword: "changeme123"
+  adminEmail: "admin@university.edu"
+  jwtSecret: "your-random-jwt-secret-here-min-32-chars"
+  sessionSecret: "your-random-session-secret-here-min-32-chars"
+
+# Database credentials
+database:
+  username: "qaroot"
+  password: "changeme"
+  database: "qaroot_mvp"
+
+# AMQ credentials
+amq:
+  username: "admin"
+  password: "changeme"
+
+# CORS settings
+cors:
+  origin: "https://qaroot.university.edu"
+
+# File upload settings
+fileUpload:
+  path: "/var/qaroot/uploads"
+  maxSize: "50MB"
+
+# Worker settings
+worker:
+  concurrency: 4
+  llmTimeout: "60s"
+  maxRetries: 3
+
+# Llama Stack configuration
+llamaStack:
+  embeddings:
+    model: "nomic-ai/nomic-embed-text-v1.5"
+    dimension: 768
+
+  inference:
+    model: "qwen2.5-14b-instruct"
+    temperature: 0.7
+    maxTokens: 2048
+
+# OpenShift routes
+routes:
+  apiService:
+    enabled: true
+    host: "api.qaroot.university.edu"
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+  websocketService:
+    enabled: true
+    host: "ws.qaroot.university.edu"
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+  frontend:
+    enabled: true
+    host: "qaroot.university.edu"
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect

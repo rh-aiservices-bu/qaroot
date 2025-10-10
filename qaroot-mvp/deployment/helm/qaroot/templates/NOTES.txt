@@ -1,0 +1,25 @@
+QARoot MVP has been deployed to {{ .Values.global.namespace }}!
+
+1. Get the application URL:
+{{- if .Values.routes.frontend.enabled }}
+   https://{{ .Values.routes.frontend.host }}
+{{- else }}
+   Run: oc port-forward svc/frontend 8080:80 -n {{ .Values.global.namespace }}
+   Then access: http://localhost:8080
+{{- end }}
+
+2. Login with default credentials:
+   Username: {{ .Values.auth.adminUsername }}
+   Password: {{ .Values.auth.adminPassword }}
+
+   ⚠️  IMPORTANT: Change the default password after first login!
+
+3. Check deployment status:
+   oc get pods -n {{ .Values.global.namespace }}
+
+4. View logs:
+   API Service:       oc logs -f deployment/api-service -n {{ .Values.global.namespace }}
+   WebSocket Service: oc logs -f deployment/websocket-service -n {{ .Values.global.namespace }}
+   Worker Pool:       oc logs -f deployment/faq-worker-pool -n {{ .Values.global.namespace }}
+
+For more information, visit: https://github.com/qaroot/qaroot-mvp

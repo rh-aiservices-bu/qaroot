@@ -1,0 +1,26 @@
+{
+  "name": "@qaroot/faq-worker-pool",
+  "version": "1.0.0",
+  "description": "QARoot FAQ Worker Pool",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@qaroot/shared": "*",
+    "amqplib": "^0.10.3",
+    "axios": "^1.6.5",
+    "dotenv": "^17.2.3",
+    "ioredis": "^5.3.2",
+    "pgvector": "^0.1.8"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.4",
+    "jest": "^29.7.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

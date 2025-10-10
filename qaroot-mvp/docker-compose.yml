@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: docker.io/pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: qaroot
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: qaroot_mvp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qaroot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: docker.io/redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  amq:
+    image: docker.io/apache/activemq-artemis:latest
+    environment:
+      ARTEMIS_USER: admin
+      ARTEMIS_PASSWORD: changeme
+    ports:
+      - "5672:5672"  # AMQP
+      - "8161:8161"  # Web console
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8161 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:

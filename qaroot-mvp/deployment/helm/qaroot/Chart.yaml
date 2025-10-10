@@ -1,0 +1,16 @@
+apiVersion: v2
+name: qaroot
+description: QARoot MVP - AI-powered question aggregation and analysis tool
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - qaroot
+  - question-aggregation
+  - ai
+  - llm
+home: https://github.com/qaroot/qaroot-mvp
+sources:
+  - https://github.com/qaroot/qaroot-mvp
+maintainers:
+  - name: QARoot Team

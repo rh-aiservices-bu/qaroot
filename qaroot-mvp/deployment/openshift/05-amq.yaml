@@ -1,0 +1,100 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: amq-pvc
+  namespace: qaroot-mvp
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gp3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amq-broker
+  namespace: qaroot-mvp
+  labels:
+    app: amq-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amq-broker
+  template:
+    metadata:
+      labels:
+        app: amq-broker
+    spec:
+      containers:
+      - name: amq-broker
+        image: registry.redhat.io/amq7/amq-broker:7.11
+        ports:
+        - containerPort: 5672
+          name: amqp
+        - containerPort: 8161
+          name: console
+        env:
+        - name: AMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: amq-credentials
+              key: username
+        - name: AMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: amq-credentials
+              key: password
+        - name: AMQ_TRANSPORTS
+          value: openwire,amqp,stomp,mqtt
+        - name: AMQ_QUEUES
+          value: analyze.questions
+        - name: AMQ_DATA_DIR
+          value: /opt/amq/data
+        volumeMounts:
+        - name: amq-storage
+          mountPath: /opt/amq/data
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 1
+          limits:
+            memory: 4Gi
+            cpu: 2
+        livenessProbe:
+          tcpSocket:
+            port: 5672
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /console
+            port: 8161
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: amq-storage
+        persistentVolumeClaim:
+          claimName: amq-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amq-broker
+  namespace: qaroot-mvp
+  labels:
+    app: amq-broker
+spec:
+  selector:
+    app: amq-broker
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: 5672
+  - name: console
+    port: 8161
+    targetPort: 8161
+  type: ClusterIP

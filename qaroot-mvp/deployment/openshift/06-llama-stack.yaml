@@ -1,0 +1,88 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-stack
+  namespace: qaroot-mvp
+  labels:
+    app: llama-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-stack
+  template:
+    metadata:
+      labels:
+        app: llama-stack
+    spec:
+      containers:
+      - name: llama-stack
+        image: llamastack/distribution:latest
+        args:
+        - llama-stack-run
+        - --config
+        - /config/config.yaml
+        - --port
+        - "5000"
+        ports:
+        - containerPort: 5000
+          name: http
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection-string
+        - name: EXTERNAL_LLM_URL
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: llm-url
+        - name: EXTERNAL_LLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: llm-api-key
+        resources:
+          requests:
+            memory: 4Gi
+            cpu: 2
+          limits:
+            memory: 8Gi
+            cpu: 4
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: llama-stack-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-stack
+  namespace: qaroot-mvp
+  labels:
+    app: llama-stack
+spec:
+  selector:
+    app: llama-stack
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000
+  type: ClusterIP
