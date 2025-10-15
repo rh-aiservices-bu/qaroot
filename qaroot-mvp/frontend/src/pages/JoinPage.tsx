@@ -34,9 +34,9 @@ export default function JoinPage() {
       setCollectionStartedAt(data.started_at || new Date().toISOString());
       if (data.description) {
         setSessionDescription(data.description);
-        setSuccess('New question: ' + data.description);
+        setSuccess('New topic: ' + data.description);
       } else {
-        setSuccess('Question collection started! You can now submit questions.');
+        setSuccess('Collection started! You can now submit your response.');
       }
     });
 
@@ -49,7 +49,7 @@ export default function JoinPage() {
     socket.on('session:update', (update: any) => {
       if (update.description !== undefined) {
         setSessionDescription(update.description);
-        setSuccess('New question: ' + update.description);
+        setSuccess('New topic: ' + update.description);
       }
       if (update.session_status !== undefined) {
         setSessionStatus(update.session_status);
@@ -242,7 +242,7 @@ export default function JoinPage() {
               marginBottom: '1.5rem'
             }}>
               <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#0066cc', marginBottom: '0.25rem' }}>
-                Question Prompt
+                Topic
               </div>
               <div style={{ fontSize: '0.9375rem', color: '#333' }}>
                 {sessionDescription}
@@ -256,11 +256,11 @@ export default function JoinPage() {
           {!canSubmit && (
             <Alert
               variant="info"
-              title="Question collection is not active"
+              title="Collection is not active"
               isInline
               style={{ marginBottom: '1rem' }}
             >
-              Please wait for the host to start question collection.
+              Please wait for the host to start collection.
             </Alert>
           )}
 
@@ -282,14 +282,14 @@ export default function JoinPage() {
                 {Math.floor(timeRemaining / 60)}:{String(timeRemaining % 60).padStart(2, '0')}
               </div>
               <div style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.25rem' }}>
-                {timeRemaining <= 0 ? 'Time expired' : 'Time remaining to submit questions'}
+                {timeRemaining <= 0 ? 'Time expired' : 'Time remaining to submit'}
               </div>
             </div>
           )}
 
           <div style={{ marginBottom: '1rem' }}>
             <label htmlFor="question" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-              Your Question <span style={{ color: 'red' }}>*</span>
+              Your Response <span style={{ color: 'red' }}>*</span>
             </label>
             <textarea
               id="question"
@@ -297,7 +297,7 @@ export default function JoinPage() {
               onChange={(e) => setQuestion(e.target.value)}
               rows={5}
               maxLength={500}
-              placeholder="Enter your question here..."
+              placeholder="Enter your response here..."
               disabled={!canSubmit}
               style={{
                 width: '100%',

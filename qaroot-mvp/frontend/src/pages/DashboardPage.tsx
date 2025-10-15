@@ -225,7 +225,7 @@ export default function DashboardPage() {
           </div>
           <div style={{ marginBottom: '1rem' }}>
             <label htmlFor="session-description" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-              Question Prompt/Description
+              Topic
             </label>
             <textarea
               id="session-description"

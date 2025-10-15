@@ -60,6 +60,26 @@ spec:
             secretKeyRef:
               name: app-credentials
               key: session-secret
+        - name: EXTERNAL_LLM_URL
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: EXTERNAL_LLM_URL
+        - name: EXTERNAL_LLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: EXTERNAL_LLM_API_KEY
+        - name: CHAT_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: CHAT_MODEL
+        - name: LLM_TIMEOUT
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: LLM_TIMEOUT
         resources:
           requests:
             memory: 512Mi

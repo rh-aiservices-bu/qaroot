@@ -297,7 +297,7 @@ export default function SessionLobbyPage() {
                     onClick={() => setShowNewQuestionModal(true)}
                     style={{ marginTop: '0.5rem' }}
                   >
-                    Ask New Question
+                    New Topic
                   </Button>
                 </>
               )}
@@ -328,13 +328,13 @@ export default function SessionLobbyPage() {
       {/* New Question Modal */}
       <Modal
         variant={ModalVariant.small}
-        title="Ask a New Question"
+        title="New Topic"
         isOpen={showNewQuestionModal}
         onClose={() => setShowNewQuestionModal(false)}
       >
         <div style={{ padding: '1rem' }}>
           <label htmlFor="new-question-description" style={{ display: 'block', marginBottom: '0.75rem', fontWeight: 600 }}>
-            Question Prompt
+            Topic
           </label>
           <textarea
             id="new-question-description"

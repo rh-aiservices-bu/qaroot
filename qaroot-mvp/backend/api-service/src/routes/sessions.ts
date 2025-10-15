@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import QRCode from 'qrcode';
-import { getPool, generateSessionPin, CreateSessionRequest } from '@qaroot/shared';
+import { getPool, generateSessionPin, CreateSessionRequest, getLLMService } from '@qaroot/shared';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { publishMessage } from '../services/queue';
 
@@ -378,6 +378,93 @@ router.get('/:id/clusters', authenticate, async (req: AuthRequest, res: Response
   } catch (error) {
     console.error('Get clusters error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/v1/sessions/:id/chat
+ * Chat with LLM about session responses
+ */
+router.post('/:id/chat', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { message, iteration } = req.body;
+    const pool = getPool();
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!iteration || iteration < 1) {
+      return res.status(400).json({ error: 'Valid iteration number is required' });
+    }
+
+    // Verify session ownership
+    const sessionResult = await pool.query(
+      'SELECT * FROM sessions WHERE id = $1 AND host_id = $2',
+      [id, req.user!.id]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found or unauthorized' });
+    }
+
+    const session = sessionResult.rows[0];
+
+    // Get questions for the specific iteration only
+    const questionsResult = await pool.query(
+      `SELECT q.question_text, q.submitted_at, q.iteration, p.nickname as participant_nickname
+       FROM questions q
+       LEFT JOIN participants p ON q.participant_id = p.id
+       WHERE q.session_id = $1 AND q.iteration = $2
+       ORDER BY q.submitted_at ASC`,
+      [id, iteration]
+    );
+
+    const questions = questionsResult.rows;
+
+    // Get the topic for this iteration
+    const iterationQuestionResult = await pool.query(
+      `SELECT question_text FROM iteration_questions WHERE session_id = $1 AND iteration = $2`,
+      [id, iteration]
+    );
+
+    const topicText = iterationQuestionResult.rows[0]?.question_text || 'N/A';
+
+    // Build context for LLM - only include current iteration
+    let context = `Session: ${session.title}\n`;
+    context += `Topic: ${topicText}\n\n`;
+    context += `Responses (${questions.length}):\n`;
+
+    questions.forEach((q, idx) => {
+      const timestamp = new Date(q.submitted_at).toLocaleString();
+      const participant = q.participant_nickname || 'Anonymous';
+      context += `  ${idx + 1}. "${q.question_text}" - ${participant} at ${timestamp}\n`;
+    });
+
+    // Call LLM
+    const llmService = getLLMService();
+    const response = await llmService.chatCompletion([
+      {
+        role: 'system',
+        content: 'You are an AI assistant helping a host understand participant responses for a specific topic in their session. You have access to the responses with timestamps and participant names for this topic only. Provide helpful insights, summaries, and analysis when asked. Be concise and actionable.'
+      },
+      {
+        role: 'user',
+        content: `${context}\n\nHost's question: ${message}`
+      }
+    ], {
+      temperature: 0.7,
+      max_tokens: 1024
+    });
+
+    res.json({
+      role: 'assistant',
+      content: response
+    });
+  } catch (error: any) {
+    console.error('Chat error:', error);
+    res.status(500).json({ error: 'Failed to process chat message' });
   }
 });
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Title,
@@ -9,8 +9,15 @@ import {
   List,
   ListItem,
   Badge,
+  TextArea,
+  ExpandableSection,
 } from '@patternfly/react-core';
-import { sessionsAPI } from '../services/api';
+import { sessionsAPI, chatAPI } from '../services/api';
+
+interface UIChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 interface Question {
   id: string;
@@ -45,6 +52,11 @@ export default function AnalysisPage() {
   const [analyzingIterations, setAnalyzingIterations] = useState<Set<number>>(new Set());
   const [error, setError] = useState('');
   const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
+  const [chatMessagesByIteration, setChatMessagesByIteration] = useState<Map<number, UIChatMessage[]>>(new Map());
+  const [chatInput, setChatInput] = useState('');
+  const [chatExpanded, setChatExpanded] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -210,6 +222,63 @@ export default function AnalysisPage() {
     }
   };
 
+  const handleSendChat = async () => {
+    if (!id || !chatInput.trim() || chatLoading || !currentRound) return;
+
+    const iteration = currentRound.iteration;
+    const userMessage: UIChatMessage = {
+      role: 'user',
+      content: chatInput.trim(),
+    };
+
+    // Add user message to the current iteration's chat history
+    setChatMessagesByIteration(prev => {
+      const newMap = new Map(prev);
+      const messages = newMap.get(iteration) || [];
+      newMap.set(iteration, [...messages, userMessage]);
+      return newMap;
+    });
+
+    setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const response = await chatAPI.send(id, userMessage.content, iteration);
+
+      // Add assistant response to the current iteration's chat history
+      setChatMessagesByIteration(prev => {
+        const newMap = new Map(prev);
+        const messages = newMap.get(iteration) || [];
+        newMap.set(iteration, [...messages, {
+          role: response.data.role as 'assistant',
+          content: response.data.content
+        }]);
+        return newMap;
+      });
+    } catch (err: any) {
+      console.error('Failed to send chat message:', err);
+
+      // Add error message to the current iteration's chat history
+      setChatMessagesByIteration(prev => {
+        const newMap = new Map(prev);
+        const messages = newMap.get(iteration) || [];
+        newMap.set(iteration, [...messages, {
+          role: 'assistant',
+          content: 'Error: Failed to get response from LLM'
+        }]);
+        return newMap;
+      });
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessagesByIteration]);
+
   if (loading) {
     return (
       <div style={{
@@ -330,8 +399,90 @@ export default function AnalysisPage() {
               fontSize: '1.1rem',
               color: '#151515'
             }}>
-              <strong>Question:</strong> {currentRound.question_text || `Round ${currentRound.iteration} responses`}
+              <strong>Topic:</strong> {currentRound.question_text || `Round ${currentRound.iteration} responses`}
             </div>
+          </div>
+
+          {/* LLM Chat Interface */}
+          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 2rem 1rem' }}>
+            <Card>
+              <CardBody>
+                <ExpandableSection
+                  toggleText={chatExpanded ? "Hide AI Assistant" : "Chat with AI Assistant"}
+                  onToggle={() => setChatExpanded(!chatExpanded)}
+                  isExpanded={chatExpanded}
+                >
+                  <div style={{ marginTop: '1rem' }}>
+                    {/* Chat Messages */}
+                    <div style={{
+                      maxHeight: '400px',
+                      overflowY: 'auto',
+                      marginBottom: '1rem',
+                      padding: '1rem',
+                      backgroundColor: '#f5f5f5',
+                      borderRadius: '4px',
+                      minHeight: '200px'
+                    }}>
+                      {(chatMessagesByIteration.get(currentRound.iteration) || []).length === 0 ? (
+                        <div style={{ textAlign: 'center', color: '#666', padding: '2rem' }}>
+                          <p>Ask the AI assistant about the responses in this topic.</p>
+                          <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                            The assistant has access to all {currentRound.questions.length} responses with timestamps and participant names.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {(chatMessagesByIteration.get(currentRound.iteration) || []).map((msg, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                marginBottom: '1rem',
+                                padding: '0.75rem',
+                                backgroundColor: msg.role === 'user' ? '#e7f1fa' : '#fff',
+                                borderRadius: '4px',
+                                borderLeft: `4px solid ${msg.role === 'user' ? '#0066cc' : '#52c41a'}`
+                              }}
+                            >
+                              <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.25rem', color: '#666' }}>
+                                {msg.role === 'user' ? 'You' : 'AI Assistant'}
+                              </div>
+                              <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                            </div>
+                          ))}
+                          <div ref={chatEndRef} />
+                        </>
+                      )}
+                    </div>
+
+                    {/* Chat Input */}
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <TextArea
+                        value={chatInput}
+                        onChange={(e) => setChatInput((e.target as HTMLTextAreaElement).value)}
+                        placeholder="Ask about the responses..."
+                        rows={3}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendChat();
+                          }
+                        }}
+                        isDisabled={chatLoading || currentRound.questions.length === 0}
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        variant="primary"
+                        onClick={handleSendChat}
+                        isDisabled={!chatInput.trim() || chatLoading || currentRound.questions.length === 0}
+                        style={{ alignSelf: 'flex-end' }}
+                      >
+                        {chatLoading ? <Spinner size="md" /> : 'Send'}
+                      </Button>
+                    </div>
+                  </div>
+                </ExpandableSection>
+              </CardBody>
+            </Card>
           </div>
 
           {/* Split Screen Layout for Current Round */}

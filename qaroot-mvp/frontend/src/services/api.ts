@@ -80,8 +80,8 @@ export const sessionsAPI = {
 
 // Chat API
 export const chatAPI = {
-  send: (sessionId: string, message: string) =>
-    api.post<{ role: 'assistant'; content: string }>(`/sessions/${sessionId}/chat`, { message }),
+  send: (sessionId: string, message: string, iteration: number) =>
+    api.post<{ role: 'assistant'; content: string }>(`/sessions/${sessionId}/chat`, { message, iteration }),
 
   getHistory: (sessionId: string) => api.get<{ messages: ChatMessage[] }>(`/sessions/${sessionId}/chat`),
 };
