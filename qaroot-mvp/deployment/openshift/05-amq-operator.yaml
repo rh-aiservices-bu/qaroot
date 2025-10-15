@@ -1,0 +1,60 @@
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: qaroot-operator-group
+  namespace: qaroot-mvp
+spec:
+  targetNamespaces:
+    - qaroot-mvp
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: amq-broker-rhel8
+  namespace: qaroot-mvp
+spec:
+  channel: 7.11.x
+  installPlanApproval: Automatic
+  name: amq-broker-rhel8
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: amq-credentials
+  namespace: qaroot-mvp
+type: Opaque
+stringData:
+  username: admin
+  password: admin123
+---
+apiVersion: broker.amq.io/v1beta1
+kind: ActiveMQArtemis
+metadata:
+  name: amq-broker
+  namespace: qaroot-mvp
+spec:
+  deploymentPlan:
+    size: 1
+    image: placeholder
+    requireLogin: false
+    persistenceEnabled: true
+    journalType: nio
+    messageMigration: false
+  console:
+    expose: true
+  acceptors:
+    - name: amqp
+      protocols: amqp
+      port: 5672
+      sslEnabled: false
+      anycastPrefix: jms.queue.
+      multicastPrefix: jms.topic.
+  adminUser: admin
+  adminPassword: admin123
+  brokerProperties:
+    - "securityEnabled=false"
+    - "addressSettings.#.defaultAddressRoutingType=ANYCAST"
+    - "addressSettings.#.defaultQueueRoutingType=ANYCAST"

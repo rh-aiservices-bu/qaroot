@@ -24,6 +24,8 @@ export interface Session {
   participant_count: number;
   question_count: number;
   current_iteration: number;
+  iteration_count?: number;
+  iterations?: Array<{ iteration: number; count: number }>;
   created_at: string;
   updated_at: string;
 }

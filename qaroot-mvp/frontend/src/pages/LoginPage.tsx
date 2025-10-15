@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Card,
   CardBody,
@@ -20,7 +19,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   const { login } = useAuth();
-  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,10 +27,10 @@ export default function LoginPage() {
 
     try {
       await login(username, password);
-      navigate('/dashboard');
+      // Force a full page reload to ensure auth state is updated
+      window.location.href = '/dashboard';
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
-    } finally {
       setLoading(false);
     }
   };

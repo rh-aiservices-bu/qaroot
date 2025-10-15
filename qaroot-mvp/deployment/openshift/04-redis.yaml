@@ -18,14 +18,18 @@ spec:
     spec:
       containers:
       - name: redis
-        image: redis:7-alpine
+        image: image-registry.openshift-image-registry.svc:5000/openshift/redis:7-el9
         ports:
         - containerPort: 6379
           name: redis
         command:
         - redis-server
+        - --protected-mode
+        - "no"
+        - --save
+        - ""
         - --appendonly
-        - "yes"
+        - "no"
         resources:
           requests:
             memory: 2Gi

@@ -33,11 +33,18 @@ export function useAuth() {
   };
 
   const logout = async () => {
-    await authAPI.logout();
+    try {
+      await authAPI.logout();
+    } catch (error) {
+      // Ignore logout API errors
+      console.error('Logout API error:', error);
+    }
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user');
     setToken(null);
     setUser(null);
+    // Force page reload to trigger redirect to login
+    window.location.href = '/login';
   };
 
   return {

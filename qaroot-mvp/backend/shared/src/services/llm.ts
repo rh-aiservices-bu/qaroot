@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { pipeline } from '@xenova/transformers';
 
 export interface EmbeddingResponse {
   embedding: number[];
@@ -8,6 +9,9 @@ export interface EmbeddingResponse {
     total_tokens: number;
   };
 }
+
+// Singleton for local embedding model
+let localEmbeddingPipeline: any | null = null;
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -40,6 +44,7 @@ export class LLMService {
   private embeddingClient: AxiosInstance;
   private embeddingModel: string;
   private chatModel: string;
+  private useLocalEmbeddings: boolean;
 
   constructor() {
     const baseURL = process.env.EXTERNAL_LLM_URL || 'http://localhost:8080/v1';
@@ -53,6 +58,9 @@ export class LLMService {
       },
       timeout: parseInt(process.env.LLM_TIMEOUT || '60000', 10),
     });
+
+    // Check if we should use local embeddings
+    this.useLocalEmbeddings = process.env.USE_LOCAL_EMBEDDINGS === 'true';
 
     // Separate client for embeddings with shorter timeout
     const embeddingURL = process.env.EMBEDDING_SERVICE_URL || baseURL;
@@ -72,17 +80,57 @@ export class LLMService {
   }
 
   /**
+   * Initialize local embedding model
+   * Downloads model on first use (cached afterwards)
+   */
+  private async getLocalEmbeddingPipeline(): Promise<any> {
+    if (!localEmbeddingPipeline) {
+      console.log('[LLM] Loading local embedding model (Xenova/all-MiniLM-L6-v2)...');
+      localEmbeddingPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+      console.log('[LLM] ✓ Local embedding model loaded');
+    }
+    return localEmbeddingPipeline;
+  }
+
+  /**
+   * Generate embedding locally using transformers.js
+   */
+  private async generateLocalEmbedding(text: string): Promise<number[]> {
+    const extractor = await this.getLocalEmbeddingPipeline();
+    const output = await extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  }
+
+  /**
    * Generate embedding for a text
    * @param text Input text to embed
-   * @returns 768-dimensional embedding vector
+   * @returns 384-dimensional embedding vector (local) or model-specific (remote)
    */
   async generateEmbedding(text: string): Promise<number[]> {
+    // Use local embeddings if enabled
+    if (this.useLocalEmbeddings) {
+      console.log(`[LLM] Generating embedding locally with transformers.js`);
+      try {
+        const embedding = await this.generateLocalEmbedding(text);
+        console.log(`[LLM] ✓ Generated local embedding (${embedding.length} dimensions)`);
+        return embedding;
+      } catch (error: any) {
+        console.error('[LLM] Local embedding failed:', error.message);
+        throw new Error(`Local embedding generation failed: ${error.message}`);
+      }
+    }
+
+    // Use remote embedding service
     try {
       console.log(`[LLM] Generating embedding using: ${this.embeddingClient.defaults.baseURL}/embeddings with model: ${this.embeddingModel}`);
-      const response = await this.embeddingClient.post<any>('/embeddings', {
-        model: this.embeddingModel,
-        input: text,
-      });
+
+      // Detect if we're using Ollama (native API) or OpenAI-compatible API
+      const isOllama = this.embeddingClient.defaults.baseURL?.includes('localhost:11434/api');
+      const requestBody = isOllama
+        ? { model: this.embeddingModel, prompt: text }
+        : { model: this.embeddingModel, input: text };
+
+      const response = await this.embeddingClient.post<any>('/embeddings', requestBody);
 
       console.log(`[LLM] Embedding response structure:`, JSON.stringify(response.data).substring(0, 200));
 

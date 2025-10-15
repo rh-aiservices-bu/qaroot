@@ -1,0 +1,34 @@
+FROM registry.access.redhat.com/ubi9/nodejs-20:latest
+
+USER 0
+
+WORKDIR /opt/app-root/src
+
+# Copy package files for all workspaces
+COPY package*.json tsconfig.json ./
+COPY backend/api-service/package*.json ./backend/api-service/
+COPY backend/shared/package*.json ./backend/shared/
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY backend/api-service ./backend/api-service
+COPY backend/shared ./backend/shared
+
+# Build shared library
+WORKDIR /opt/app-root/src/backend/shared
+RUN npm run build
+
+# Return to api-service directory
+WORKDIR /opt/app-root/src
+
+# Set working directory to api-service
+WORKDIR /opt/app-root/src/backend/api-service
+
+# Expose port
+EXPOSE 3000
+
+USER 1001
+
+CMD ["npx", "tsx", "src/index.ts"]

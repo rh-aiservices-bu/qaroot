@@ -1,0 +1,91 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qaroot-worker-pool
+  namespace: qaroot-mvp
+  labels:
+    app: qaroot-worker-pool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qaroot-worker-pool
+  template:
+    metadata:
+      labels:
+        app: qaroot-worker-pool
+    spec:
+      containers:
+      - name: worker-pool
+        image: quay.io/hayesphilip/qaroot-worker-pool:latest
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: username
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: database
+        - name: DATABASE_URL
+          value: "postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@postgresql:5432/$(DATABASE_NAME)"
+        - name: AMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: amq-credentials
+              key: username
+        - name: AMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: amq-credentials
+              key: password
+        - name: AMQ_URL
+          value: "amqp://rabbitmq:5672"
+        - name: EXTERNAL_LLM_URL
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: EXTERNAL_LLM_URL
+        - name: EXTERNAL_LLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: EXTERNAL_LLM_API_KEY
+        - name: CHAT_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: CHAT_MODEL
+        - name: USE_LOCAL_EMBEDDINGS
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: USE_LOCAL_EMBEDDINGS
+        - name: CLUSTERING_THRESHOLD
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: CLUSTERING_THRESHOLD
+        - name: LLM_TIMEOUT
+          valueFrom:
+            secretKeyRef:
+              name: llm-config
+              key: LLM_TIMEOUT
+              optional: true
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 1000m
+          limits:
+            memory: 4Gi
+            cpu: 2000m

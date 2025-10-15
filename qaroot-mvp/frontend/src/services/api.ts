@@ -1,7 +1,11 @@
 import axios from 'axios';
 import type { LoginResponse, CreateSessionResponse, Session, Question, QuestionCluster, ChatMessage } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// Runtime config from window.ENV or build-time env
+// @ts-ignore
+const API_URL = (typeof window !== 'undefined' && window.ENV?.VITE_API_URL) || import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+console.log('API_URL:', API_URL);
 
 const api = axios.create({
   baseURL: `${API_URL}/api/v1`,

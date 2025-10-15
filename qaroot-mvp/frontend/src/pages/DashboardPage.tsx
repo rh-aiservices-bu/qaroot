@@ -159,24 +159,23 @@ export default function DashboardPage() {
                           <Title headingLevel="h3" size="md" style={{ marginBottom: '0.5rem' }}>
                             {session.title}
                           </Title>
-                          <div style={{ fontSize: '0.875rem', color: '#666' }}>
+                          <div style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.5rem' }}>
                             Created: {new Date(session.created_at).toLocaleDateString()} {new Date(session.created_at).toLocaleTimeString()}
                           </div>
+                          {session.iterations && session.iterations.length > 0 && (
+                            <div style={{ fontSize: '0.875rem', color: '#444', marginTop: '0.5rem' }}>
+                              <strong>{session.iteration_count || 0} rounds:</strong>{' '}
+                              {session.iterations.map((iter, idx) => (
+                                <span key={iter.iteration}>
+                                  Round {iter.iteration} ({iter.count} {iter.count === 1 ? 'response' : 'responses'})
+                                  {idx < session.iterations!.length - 1 ? ', ' : ''}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <Badge isRead>{session.question_count || 0} questions</Badge>
-                          <Badge
-                            style={{
-                              backgroundColor:
-                                session.session_status === 'active' ? '#3e8635' :
-                                session.session_status === 'waiting' ? '#8a8d90' :
-                                session.session_status === 'paused' ? '#f0ab00' :
-                                '#0066cc',
-                              color: '#fff'
-                            }}
-                          >
-                            {session.session_status}
-                          </Badge>
+                          <Badge isRead>{session.question_count || 0} total responses</Badge>
                           <Button
                             variant="danger"
                             isDanger
@@ -184,7 +183,6 @@ export default function DashboardPage() {
                               e.stopPropagation();
                               setDeleteSessionId(session.id);
                             }}
-                            style={{ marginLeft: '0.5rem' }}
                           >
                             Delete
                           </Button>

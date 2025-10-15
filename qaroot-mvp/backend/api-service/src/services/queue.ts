@@ -5,8 +5,26 @@ let channel: any = null;
 
 export async function connectAMQ(): Promise<void> {
   try {
-    connection = await amqp.connect(process.env.AMQ_URL || 'amqp://localhost:5672');
+    let amqUrl = process.env.AMQ_URL || 'amqp://localhost:5672';
+
+    // Add credentials if provided separately
+    if (process.env.AMQ_USER && process.env.AMQ_PASSWORD) {
+      const url = new URL(amqUrl);
+      url.username = process.env.AMQ_USER;
+      url.password = process.env.AMQ_PASSWORD;
+      amqUrl = url.toString();
+      console.log(`Connecting to AMQ with credentials at: ${amqUrl.replace(process.env.AMQ_PASSWORD || '', '***')}`);
+    } else {
+      console.log(`Connecting to AMQ without credentials at: ${amqUrl}`);
+    }
+
+    console.log('Attempting amqp.connect...');
+    connection = await amqp.connect(amqUrl);
+    console.log('✓ AMQP connection established');
+
+    console.log('Creating channel...');
     channel = await connection.createChannel();
+    console.log('✓ Channel created');
 
     // Assert queues
     await channel.assertQueue('analyze.questions', { durable: true });

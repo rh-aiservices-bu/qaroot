@@ -11,6 +11,7 @@ export function handleQuestionEvents(io: Server, socket: Socket) {
    * Handle question submission
    */
   socket.on('question:submit', async (data: SubmitQuestionRequest, callback) => {
+    console.log('[Question] Submit request:', data);
     try {
       const { session_id, question_text, participant_id } = data;
 
@@ -80,6 +81,7 @@ export function handleQuestionEvents(io: Server, socket: Socket) {
       await redis.setex(cooldownKey, SUBMISSION_COOLDOWN / 1000, Date.now().toString());
 
       // Broadcast new question to host
+      console.log('[Question] Broadcasting to host room:', `session:${session_id}:host`, question);
       io.to(`session:${session_id}:host`).emit('question:new', question);
 
       // Update participant count broadcast

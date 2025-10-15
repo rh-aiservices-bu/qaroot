@@ -19,7 +19,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     const pool = getPool();
     const result = await pool.query(
-      'SELECT * FROM users WHERE username = $1 AND is_active = true',
+      'SELECT * FROM users WHERE email = $1',
       [username]
     );
 
@@ -34,15 +34,11 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Update last login
-    await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
-
     // Generate JWT token
     const token = jwt.sign(
       {
         id: user.id,
         email: user.email,
-        username: user.username,
         role: user.role,
       },
       process.env.JWT_SECRET!,

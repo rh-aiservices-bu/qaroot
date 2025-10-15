@@ -65,7 +65,7 @@ export async function analyzeQuestionsWorker(job: AnalyzeQuestionsJob): Promise<
 
           // Store embedding in database
           await pool.query('UPDATE questions SET embedding = $1 WHERE id = $2', [
-            `[${embedding.join(',')}]`,  // Store as PostgreSQL array format
+            embedding,  // pg library will convert JS array to PostgreSQL array
             question.id,
           ]);
         } catch (error) {
@@ -88,22 +88,21 @@ export async function analyzeQuestionsWorker(job: AnalyzeQuestionsJob): Promise<
     }
 
     // Step 2: Cluster questions
-    let clusters: any[] = [];
-
     if (questionsWithEmbeddings.length === 0) {
-      console.log(`[Worker] No embeddings available, creating single cluster for all questions`);
-      // Create a single cluster with all questions when embeddings aren't available
-      clusters = [{
-        questionIds: questions.map((q: any) => q.id),
-        questions: questions.map((q: any) => q.question_text),
-        size: questions.length,
-      }];
-    } else {
-      // Use cosine similarity clustering when embeddings are available
-      console.log(`[Worker] Clustering ${questionsWithEmbeddings.length} questions`);
-      const similarityThreshold = parseFloat(process.env.CLUSTERING_THRESHOLD || '0.85');
-      clusters = clusterQuestions(questionsWithEmbeddings, similarityThreshold);
+      console.error(`[Worker] No embeddings available - all embedding generation failed`);
+      throw new Error('Embedding generation failed for all questions. Please try again.');
     }
+
+    if (questionsWithEmbeddings.length < questions.length) {
+      const failedCount = questions.length - questionsWithEmbeddings.length;
+      console.error(`[Worker] Failed to generate embeddings for ${failedCount} out of ${questions.length} questions`);
+      throw new Error(`Embedding generation failed for ${failedCount} questions. Please try again.`);
+    }
+
+    // Use cosine similarity clustering when embeddings are available
+    console.log(`[Worker] Clustering ${questionsWithEmbeddings.length} questions`);
+    const similarityThreshold = parseFloat(process.env.CLUSTERING_THRESHOLD || '0.85');
+    const clusters = clusterQuestions(questionsWithEmbeddings, similarityThreshold);
 
     console.log(`[Worker] Found ${clusters.length} clusters`);
 
@@ -118,19 +117,12 @@ export async function analyzeQuestionsWorker(job: AnalyzeQuestionsJob): Promise<
 
       console.log(`[Worker] Processing cluster ${i + 1}/${clusters.length} with ${cluster.size} questions`);
 
-      // Find representative question (closest to centroid or first question)
-      let representative: any;
+      // Find representative question (closest to centroid)
       const clusterQuestions = questionsWithEmbeddings.filter((q) =>
         cluster.questionIds.includes(q.id)
       );
 
-      if (clusterQuestions.length > 0) {
-        representative = findRepresentativeQuestion(clusterQuestions);
-      } else {
-        // Fallback when no embeddings: use first question
-        const firstQuestion = questions.find((q: any) => q.id === cluster.questionIds[0]);
-        representative = { text: firstQuestion?.question_text || cluster.questions[0] };
-      }
+      const representative = findRepresentativeQuestion(clusterQuestions);
 
       // Generate LLM summary for this cluster
       let summary = '';

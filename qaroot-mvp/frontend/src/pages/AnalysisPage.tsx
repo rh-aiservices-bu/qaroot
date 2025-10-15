@@ -22,10 +22,10 @@ interface Question {
 
 interface Cluster {
   id: string;
-  cluster_label: string;
-  representative_question: string;
+  cluster_label?: string;
+  representative_question?: string;
   question_count: number;
-  questions: Question[];
+  questions?: Question[];
   iteration: number;
 }
 
@@ -39,8 +39,6 @@ interface IterationGroup {
 export default function AnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [clusters, setClusters] = useState<Cluster[]>([]);
-  const [allQuestions, setAllQuestions] = useState<Question[]>([]);
   const [iterations, setIterations] = useState<IterationGroup[]>([]);
   const [sessionTitle, setSessionTitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -65,8 +63,6 @@ export default function AnalysisPage() {
         const iterationQuestionsData = iterationQuestionsResponse.data.iteration_questions || [];
 
         setSessionTitle(session.title || '');
-        setClusters(clusterData);
-        setAllQuestions(questionData);
 
         // Create map of iteration questions
         const iterationQuestionsMap = new Map<number, string>();
@@ -141,9 +137,6 @@ export default function AnalysisPage() {
           const clusterData = clustersResponse.data.clusters || [];
           const questionData = questionsResponse.data.questions || [];
           const iterationQuestionsData = iterationQuestionsResponse.data.iteration_questions || [];
-
-          setClusters(clusterData);
-          setAllQuestions(questionData);
 
           const iterationQuestionsMap = new Map<number, string>();
           iterationQuestionsData.forEach((iq: any) => {
@@ -328,20 +321,18 @@ export default function AnalysisPage() {
       ) : (
         <>
           {/* Question Header */}
-          {currentRound.question_text && (
-            <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 2rem 1rem' }}>
-              <div style={{
-                padding: '1rem 1.5rem',
-                backgroundColor: '#e7f1fa',
-                borderLeft: '4px solid #0066cc',
-                borderRadius: '4px',
-                fontSize: '1.1rem',
-                color: '#151515'
-              }}>
-                <strong>Question:</strong> {currentRound.question_text}
-              </div>
+          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 2rem 1rem' }}>
+            <div style={{
+              padding: '1rem 1.5rem',
+              backgroundColor: '#e7f1fa',
+              borderLeft: '4px solid #0066cc',
+              borderRadius: '4px',
+              fontSize: '1.1rem',
+              color: '#151515'
+            }}>
+              <strong>Question:</strong> {currentRound.question_text || `Round ${currentRound.iteration} responses`}
             </div>
-          )}
+          </div>
 
           {/* Split Screen Layout for Current Round */}
           <div style={{

@@ -1,4 +1,4 @@
-export * from './types';
+export * from './types/index';
 export * from './database/pool';
 export * from './database/migrate';
 export * from './utils/session-pin';

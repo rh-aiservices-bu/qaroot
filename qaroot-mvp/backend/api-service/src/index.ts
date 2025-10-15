@@ -16,18 +16,30 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(helmet());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+
+// CORS configuration - allow all origins in production
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow all origins
+    callback(null, true);
+  },
   credentials: true,
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Trust proxy headers from OpenShift/Kubernetes
+app.set('trust proxy', true);
 
 // Rate limiting (disabled in development)
 if (process.env.NODE_ENV === 'production') {
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
+    max: 1000, // limit each IP to 1000 requests per windowMs (increased for development)
+    standardHeaders: true,
+    legacyHeaders: false,
   });
   app.use('/api/', limiter);
 }
@@ -62,13 +74,16 @@ async function start() {
       await runMigrations();
     }
 
-    // Connect to AMQ
-    await connectAMQ();
-
-    // Start server
+    // Start server FIRST so health checks pass
     app.listen(PORT, () => {
       console.log(`✓ API Service listening on port ${PORT}`);
       console.log(`  Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+
+    // Connect to AMQ asynchronously (don't block startup)
+    connectAMQ().catch(err => {
+      console.error('AMQ connection failed, will retry:', err.message);
+      // Could add retry logic here
     });
   } catch (error) {
     console.error('Failed to start API Service:', error);

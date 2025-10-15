@@ -1,0 +1,31 @@
+FROM registry.access.redhat.com/ubi9/nodejs-20:latest
+
+USER 0
+
+WORKDIR /opt/app-root/src
+
+# Copy package files for all workspaces
+COPY package*.json tsconfig.json ./
+COPY backend/faq-worker-pool/package*.json ./backend/faq-worker-pool/
+COPY backend/shared/package*.json ./backend/shared/
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY backend/faq-worker-pool ./backend/faq-worker-pool
+COPY backend/shared ./backend/shared
+
+# Build shared library
+WORKDIR /opt/app-root/src/backend/shared
+RUN npm run build
+
+# Return to root
+WORKDIR /opt/app-root/src
+
+# Set working directory to faq-worker-pool
+WORKDIR /opt/app-root/src/backend/faq-worker-pool
+
+USER 1001
+
+CMD ["npx", "tsx", "src/index.ts"]

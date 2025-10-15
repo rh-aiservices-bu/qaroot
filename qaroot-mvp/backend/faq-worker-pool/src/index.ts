@@ -13,7 +13,9 @@ let activeJobs = 0;
 
 async function connectAMQ(): Promise<void> {
   try {
-    connection = await amqp.connect(AMQ_URL);
+    const amqUrl = AMQ_URL;
+
+    connection = await amqp.connect(amqUrl);
     channel = await connection.createChannel();
 
     // Set prefetch to control concurrency

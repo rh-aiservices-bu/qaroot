@@ -34,9 +34,9 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
  * POST /api/v1/sessions
  * Create a new session
  */
-router.post('/', authenticate, requireRole('host', 'admin'), async (req: AuthRequest, res: Response) => {
+router.post('/', authenticate, requireRole('facilitator', 'host', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const { title, description, collection_timer_duration = 60 }: CreateSessionRequest = req.body;
+    const { title, description }: CreateSessionRequest = req.body;
 
     if (!title || title.trim().length === 0) {
       return res.status(400).json({ error: 'Session title is required' });
@@ -55,13 +55,22 @@ router.post('/', authenticate, requireRole('host', 'admin'), async (req: AuthReq
     }
 
     const result = await pool.query(
-      `INSERT INTO sessions (host_id, title, description, session_pin, collection_timer_duration, session_status)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO sessions (host_id, title, description, session_pin)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [req.user!.id, title.trim(), description?.trim() || null, pin, collection_timer_duration, 'waiting']
+      [req.user!.id, title.trim(), description?.trim() || null, pin]
     );
 
     const session = result.rows[0];
+
+    // Store the initial question in iteration_questions table (iteration 1)
+    if (description && description.trim().length > 0) {
+      await pool.query(
+        `INSERT INTO iteration_questions (session_id, iteration, question_text)
+         VALUES ($1, 1, $2)`,
+        [session.id, description.trim()]
+      );
+    }
 
     // Generate QR code for joining
     const joinUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/join/${pin}`;
@@ -113,7 +122,6 @@ router.post('/:id/start', authenticate, async (req: AuthRequest, res: Response) 
       `UPDATE sessions
        SET session_status = 'active',
            collection_started_at = NOW(),
-           collection_ended_at = NULL,
            actual_start = COALESCE(actual_start, NOW())
        WHERE id = $1 AND host_id = $2
        RETURNING *`,
@@ -123,8 +131,6 @@ router.post('/:id/start', authenticate, async (req: AuthRequest, res: Response) 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Session not found or unauthorized' });
     }
-
-    console.log(`[Start Collection] Session ${id} started at ${result.rows[0].collection_started_at}`);
 
     res.json({ session: result.rows[0] });
   } catch (error) {
@@ -144,8 +150,8 @@ router.post('/:id/end', authenticate, async (req: AuthRequest, res: Response) =>
 
     const result = await pool.query(
       `UPDATE sessions
-       SET session_status = 'paused',
-           collection_ended_at = NOW()
+       SET session_status = 'completed',
+           ended_at = NOW()
        WHERE id = $1 AND host_id = $2
        RETURNING *`,
       [id, req.user!.id]
@@ -176,14 +182,14 @@ router.post('/:id/new-question', authenticate, async (req: AuthRequest, res: Res
       return res.status(400).json({ error: 'Question description is required' });
     }
 
-    // Increment iteration and update description
+    // Increment iteration and update session
     const result = await pool.query(
       `UPDATE sessions
-       SET current_iteration = current_iteration + 1,
-           description = $2,
+       SET description = $2,
            session_status = 'active',
            collection_started_at = NOW(),
-           collection_ended_at = NULL
+           actual_start = COALESCE(actual_start, NOW()),
+           current_iteration = current_iteration + 1
        WHERE id = $1 AND host_id = $3
        RETURNING *`,
       [id, description.trim(), req.user!.id]
@@ -195,11 +201,12 @@ router.post('/:id/new-question', authenticate, async (req: AuthRequest, res: Res
 
     const session = result.rows[0];
 
-    // Save the question text for this iteration
+    // Store the new question in iteration_questions table
     await pool.query(
       `INSERT INTO iteration_questions (session_id, iteration, question_text)
        VALUES ($1, $2, $3)
-       ON CONFLICT (session_id, iteration) DO UPDATE SET question_text = $3`,
+       ON CONFLICT (session_id, iteration) DO UPDATE
+       SET question_text = EXCLUDED.question_text`,
       [id, session.current_iteration, description.trim()]
     );
 
@@ -219,13 +226,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const pool = getPool();
 
-    // Delete related data first (cascading deletes)
-    await pool.query('DELETE FROM host_chat_messages WHERE session_id = $1', [id]);
-    await pool.query('DELETE FROM questions WHERE session_id = $1', [id]);
-    await pool.query('DELETE FROM question_clusters WHERE session_id = $1', [id]);
-    await pool.query('DELETE FROM participants WHERE session_id = $1', [id]);
-
-    // Delete the session
+    // Delete the session (cascading deletes will handle related data)
     const result = await pool.query(
       'DELETE FROM sessions WHERE id = $1 AND host_id = $2 RETURNING id',
       [id, req.user!.id]
@@ -309,12 +310,32 @@ router.get('/:id/iteration-questions', authenticate, async (req: AuthRequest, re
     const { id } = req.params;
     const pool = getPool();
 
+    // Get iteration questions from the table
     const result = await pool.query(
       `SELECT * FROM iteration_questions WHERE session_id = $1 ORDER BY iteration ASC`,
       [id]
     );
 
-    res.json({ iteration_questions: result.rows });
+    const iterationQuestions = result.rows;
+
+    // If iteration 1 is missing, use the session description as a fallback
+    if (!iterationQuestions.some((iq: any) => iq.iteration === 1)) {
+      const sessionResult = await pool.query(
+        'SELECT description FROM sessions WHERE id = $1',
+        [id]
+      );
+
+      if (sessionResult.rows.length > 0 && sessionResult.rows[0].description) {
+        iterationQuestions.unshift({
+          session_id: id,
+          iteration: 1,
+          question_text: sessionResult.rows[0].description,
+          created_at: new Date()
+        });
+      }
+    }
+
+    res.json({ iteration_questions: iterationQuestions });
   } catch (error) {
     console.error('Get iteration questions error:', error);
     res.status(500).json({ error: 'Internal server error' });

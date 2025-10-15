@@ -24,7 +24,7 @@ export default function Navigation() {
         </h1>
       </div>
 
-      <Nav theme="dark">
+      <Nav>
         <NavList>
           <NavItem
             isActive={isActive('/dashboard')}
@@ -51,7 +51,25 @@ export default function Navigation() {
         fontSize: '0.875rem',
         color: '#8a8d90'
       }}>
-        <div>Logged in as admin</div>
+        <div style={{ marginBottom: '1rem' }}>Logged in as admin</div>
+        <button
+          onClick={() => {
+            localStorage.removeItem('auth_token');
+            navigate('/login');
+          }}
+          style={{
+            background: 'transparent',
+            border: '1px solid #8a8d90',
+            color: '#8a8d90',
+            padding: '0.5rem 1rem',
+            cursor: 'pointer',
+            borderRadius: '4px',
+            width: '100%',
+            fontSize: '0.875rem'
+          }}
+        >
+          Logout
+        </button>
       </div>
     </div>
   );

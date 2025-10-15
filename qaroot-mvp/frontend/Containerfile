@@ -1,0 +1,48 @@
+# Build stage
+FROM registry.access.redhat.com/ubi9/nodejs-20:latest AS builder
+
+USER 0
+
+WORKDIR /opt/app-root/src
+
+# Copy package files
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy frontend source code only
+COPY frontend ./
+
+# Build the frontend
+RUN npm run build
+
+# Production stage
+FROM registry.access.redhat.com/ubi9/nginx-124:latest
+
+USER 0
+
+# Copy built assets to a temporary location
+COPY --from=builder /opt/app-root/src/dist /tmp/dist
+
+# Copy nginx configuration for SPA routing
+COPY frontend/nginx.conf /opt/app-root/etc/nginx.default.d/spa.conf
+
+# Copy runtime config script
+COPY frontend/nginx-runtime-config.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/nginx-runtime-config.sh
+
+# Set proper permissions and prepare directory
+RUN mkdir -p /opt/app-root/src && \
+    cp -r /tmp/dist/* /opt/app-root/src/ && \
+    chown -R 1001:0 /opt/app-root/src && \
+    chmod -R g+w /opt/app-root/src && \
+    rm -rf /tmp/dist
+
+# Expose port
+EXPOSE 8080
+
+USER 1001
+
+# Run config script and nginx
+CMD ["/usr/local/bin/nginx-runtime-config.sh"]

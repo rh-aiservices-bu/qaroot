@@ -7,8 +7,6 @@ import {
   Button,
   Badge,
   Spinner,
-  List,
-  ListItem,
   Modal,
   ModalVariant,
 } from '@patternfly/react-core';
@@ -43,16 +41,9 @@ export default function SessionLobbyPage() {
       setQuestions(questionsResponse.data.questions);
       setLoading(false);
 
-      // Generate QR code
+      // Set QR code URL (QR generation happens in separate useEffect)
       const joinUrl = `${window.location.origin}/join/${sessionData.session_pin}`;
       setQrCodeUrl(joinUrl);
-
-      if (canvasRef.current) {
-        QRCode.toCanvas(canvasRef.current, joinUrl, {
-          width: 256,
-          margin: 2,
-        }).catch((err) => console.error('QR code generation error:', err));
-      }
     }).catch((err) => {
       console.error('Failed to load session:', err);
       setLoading(false);
@@ -91,6 +82,20 @@ export default function SessionLobbyPage() {
     };
   }, [id]);
 
+  // QR code generation effect
+  useEffect(() => {
+    console.log('QR code effect triggered:', { qrCodeUrl, hasCanvas: !!canvasRef.current });
+    if (qrCodeUrl && canvasRef.current) {
+      console.log('Generating QR code for:', qrCodeUrl);
+      QRCode.toCanvas(canvasRef.current, qrCodeUrl, {
+        width: 256,
+        margin: 2,
+      })
+        .then(() => console.log('QR code generated successfully'))
+        .catch((err) => console.error('QR code generation error:', err));
+    }
+  }, [qrCodeUrl]);
+
   // Timer countdown effect
   useEffect(() => {
     if (!session || session.session_status !== 'active' || !session.collection_started_at) {
@@ -98,10 +103,21 @@ export default function SessionLobbyPage() {
       return;
     }
 
-    // Start with full duration and count down from there
-    // This avoids clock sync issues between client and server
+    // Calculate remaining time based on when collection started
+    const startedAt = new Date(session.collection_started_at).getTime();
+    const now = Date.now();
+    const elapsed = Math.floor((now - startedAt) / 1000);
     const duration = session.collection_timer_duration || 60;
-    setTimeRemaining(duration);
+    const remaining = Math.max(0, duration - elapsed);
+
+    console.log('[Timer] collection_started_at:', session.collection_started_at);
+    console.log('[Timer] startedAt (ms):', startedAt);
+    console.log('[Timer] now (ms):', now);
+    console.log('[Timer] elapsed (seconds):', elapsed);
+    console.log('[Timer] duration (seconds):', duration);
+    console.log('[Timer] remaining (seconds):', remaining);
+
+    setTimeRemaining(remaining);
 
     // Count down every second
     const interval = setInterval(() => {
@@ -119,9 +135,11 @@ export default function SessionLobbyPage() {
   const handleStartCollection = async () => {
     if (!id) return;
     try {
+      console.log('[Start Collection] Current session state before API call:', session);
       const response = await sessionsAPI.start(id);
       console.log('[Start Collection] API response:', response.data.session);
-      console.log('[Start Collection] collection_started_at:', response.data.session.collection_started_at);
+      console.log('[Start Collection] collection_started_at from API:', response.data.session.collection_started_at);
+      console.log('[Start Collection] Current time:', new Date().toISOString());
       setSession(response.data.session);
       const socket = connectSocket();
       socket.emit('collection:start', { session_id: id });
@@ -139,17 +157,6 @@ export default function SessionLobbyPage() {
       socket.emit('collection:end', { session_id: id });
     } catch (err) {
       console.error('Failed to end collection:', err);
-    }
-  };
-
-  const handleAnalyze = async () => {
-    if (!id) return;
-    try {
-      await sessionsAPI.analyze(id);
-      // Navigate to analysis view
-      navigate(`/session/${id}/analysis`);
-    } catch (err) {
-      console.error('Failed to analyze questions:', err);
     }
   };
 

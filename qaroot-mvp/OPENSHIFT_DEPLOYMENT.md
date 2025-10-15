@@ -5,10 +5,31 @@ Complete guide for deploying QARoot MVP to OpenShift.
 ## Prerequisites
 
 - OpenShift CLI (`oc`) installed
-- Helm 3.x installed
-- Access to an OpenShift cluster
-- LLM service endpoint (OpenAI-compatible API)
-- Embedding service endpoint
+- Access to an OpenShift cluster with:
+  - Ability to create projects/namespaces
+  - Ability to create routes (for external access)
+  - Persistent volume support (for PostgreSQL)
+- LLM service endpoint (OpenAI-compatible API) - for chat completion/summarization only
+  - **Note:** Embeddings are computed locally using transformers.js - no external embedding service needed
+- Container images pushed to accessible registry (quay.io/hayesphilip/* in the provided manifests)
+
+## Architecture Overview
+
+The deployment consists of:
+- **PostgreSQL** (15-el9): Primary database with persistent storage
+- **Redis** (7-el9): Session store and WebSocket pub/sub (no persistence)
+- **RabbitMQ** (3-management-alpine): Message queue for worker jobs
+- **API Service**: REST API (Node.js/Express)
+- **WebSocket Service**: Real-time communication (Socket.io)
+- **Worker Pool**: Background job processing for analysis (uses local embeddings)
+- **Frontend**: Static SPA (React/Vite served by Nginx)
+
+## Important Configuration Notes
+
+1. **Clustering Threshold**: Set to `0.65` for optimal semantic grouping (not 0.85)
+2. **Redis Persistence**: Disabled (`--save ""` and `--appendonly no`) to avoid write errors
+3. **Embeddings**: Generated locally on CPU (384 dimensions) - no GPU required
+4. **Routes**: All routes use edge TLS termination
 
 ## Deployment Steps
 
@@ -34,63 +55,96 @@ oc project qaroot-mvp
 
 ### 3. Create Secrets
 
-#### A. LLM Configuration Secret
+The deployment requires the following secrets. You can use the provided manifests in `deployment/openshift/01-secrets.yaml` as templates.
+
+#### A. PostgreSQL Credentials
 
 ```bash
-# Create secret with your LLM and embedding service details
+oc create secret generic postgres-credentials \
+  --from-literal=username='qaroot' \
+  --from-literal=password="$(openssl rand -base64 24)" \
+  --from-literal=database='qaroot_mvp' \
+  --from-literal=host='postgresql'
+```
+
+#### B. Application Credentials
+
+```bash
+oc create secret generic app-credentials \
+  --from-literal=jwt-secret="$(openssl rand -base64 32)" \
+  --from-literal=session-secret="$(openssl rand -base64 32)" \
+  --from-literal=admin-email='admin@qaroot.local' \
+  --from-literal=admin-username='admin' \
+  --from-literal=admin-password='admin123'
+```
+
+#### C. LLM Configuration Secret
+
+**Note:** Embeddings are computed locally on CPU using transformers.js - no external embedding service needed!
+
+```bash
+# Set your LLM service details (for chat/summarization only)
+export EXTERNAL_LLM_URL='https://your-llm-endpoint/v1'
+export EXTERNAL_LLM_API_KEY='your-api-key-here'
+export CHAT_MODEL='qwen2.5-14b-instruct'
+
+# Create secret with optimal clustering threshold
 oc create secret generic llm-config \
-  --from-literal=EXTERNAL_LLM_URL='https://your-llm-endpoint/v1' \
-  --from-literal=EXTERNAL_LLM_API_KEY='your-api-key-here' \
-  --from-literal=EMBEDDING_SERVICE_URL='https://your-embedding-endpoint/embeddings' \
-  --from-literal=EMBEDDING_SERVICE_API_KEY='your-embedding-api-key-here' \
-  --from-literal=CHAT_MODEL='qwen2.5-14b-instruct' \
-  --from-literal=EMBEDDING_MODEL='nomic-embed-text-v1.5' \
-  --from-literal=EMBEDDING_TIMEOUT='15000' \
+  --from-literal=EXTERNAL_LLM_URL="$EXTERNAL_LLM_URL" \
+  --from-literal=EXTERNAL_LLM_API_KEY="$EXTERNAL_LLM_API_KEY" \
+  --from-literal=CHAT_MODEL="$CHAT_MODEL" \
+  --from-literal=USE_LOCAL_EMBEDDINGS='true' \
   --from-literal=LLM_TIMEOUT='60000' \
-  --from-literal=CLUSTERING_THRESHOLD='0.85'
+  --from-literal=CLUSTERING_THRESHOLD='0.65'
 ```
 
-**Example with Red Hat AI Services:**
+**Example with OpenAI:**
 ```bash
 oc create secret generic llm-config \
-  --from-literal=EXTERNAL_LLM_URL='https://qwen-2-5-14b-instruct-maas-apicast-production.apps.prod.rhoai.rh-aiservices-bu.com:443/v1' \
-  --from-literal=EXTERNAL_LLM_API_KEY='your-maas-token' \
-  --from-literal=EMBEDDING_SERVICE_URL='https://nomic-embed-text-v1-5-maas-apicast-production.apps.prod.rhoai.rh-aiservices-bu.com:443/embeddings' \
-  --from-literal=EMBEDDING_SERVICE_API_KEY='your-maas-token' \
-  --from-literal=CHAT_MODEL='/mnt/models' \
-  --from-literal=EMBEDDING_MODEL='/mnt/models' \
-  --from-literal=EMBEDDING_TIMEOUT='15000' \
-  --from-literal=LLM_TIMEOUT='60000'
+  --from-literal=EXTERNAL_LLM_URL='https://api.openai.com/v1' \
+  --from-literal=EXTERNAL_LLM_API_KEY='sk-...' \
+  --from-literal=CHAT_MODEL='gpt-4' \
+  --from-literal=USE_LOCAL_EMBEDDINGS='true' \
+  --from-literal=LLM_TIMEOUT='60000' \
+  --from-literal=CLUSTERING_THRESHOLD='0.65'
 ```
 
-#### B. Application Secrets
+### 4. Deploy Application
+
+Deploy in the following order to ensure dependencies are available:
 
 ```bash
-# Generate secure random secrets
-JWT_SECRET=$(openssl rand -base64 32)
-SESSION_SECRET=$(openssl rand -base64 32)
-DB_PASSWORD=$(openssl rand -base64 24)
+# 1. Deploy PostgreSQL
+oc apply -f deployment/openshift/03-postgresql.yaml -n qaroot-mvp
+oc wait --for=condition=ready pod -l app=postgresql -n qaroot-mvp --timeout=300s
 
-# Create application secrets
-oc create secret generic qaroot-secrets \
-  --from-literal=JWT_SECRET="$JWT_SECRET" \
-  --from-literal=SESSION_SECRET="$SESSION_SECRET" \
-  --from-literal=DATABASE_PASSWORD="$DB_PASSWORD" \
-  --from-literal=REDIS_PASSWORD="qaroot$(openssl rand -base64 12)" \
-  --from-literal=AMQ_PASSWORD="qaroot$(openssl rand -base64 12)"
-```
+# 2. Run database migrations
+oc apply -f deployment/openshift/06-db-migrations.yaml -n qaroot-mvp
+oc wait --for=condition=complete job/db-migrations -n qaroot-mvp --timeout=120s
 
-### 4. Deploy with Helm
+# 3. Deploy Redis
+oc apply -f deployment/openshift/04-redis.yaml -n qaroot-mvp
+oc wait --for=condition=ready pod -l app=redis -n qaroot-mvp --timeout=120s
 
-```bash
-# From the project root directory
-helm install qaroot deployment/helm/qaroot \
-  --namespace qaroot-mvp \
-  --create-namespace \
-  --wait
+# 4. Deploy RabbitMQ (or AMQ Operator)
+oc apply -f deployment/openshift/05-rabbitmq.yaml -n qaroot-mvp
+oc wait --for=condition=ready pod -l app=rabbitmq -n qaroot-mvp --timeout=120s
+
+# 5. Deploy application services
+oc apply -f deployment/openshift/08-api-service.yaml -n qaroot-mvp
+oc apply -f deployment/openshift/09-websocket-service.yaml -n qaroot-mvp
+oc apply -f deployment/openshift/10-worker-pool.yaml -n qaroot-mvp
+
+# 6. Deploy frontend
+oc apply -f deployment/openshift/07-frontend.yaml -n qaroot-mvp
 
 # Check deployment status
 oc get pods -n qaroot-mvp
+```
+
+**Or deploy all at once (less controlled):**
+```bash
+oc apply -f deployment/openshift/ -n qaroot-mvp
 ```
 
 ### 5. Get Application URL
@@ -110,14 +164,16 @@ echo "https://$(oc get route qaroot-frontend -n qaroot-mvp -o jsonpath='{.spec.h
 oc get pods -n qaroot-mvp
 
 # Expected output:
-# NAME                                READY   STATUS    RESTARTS   AGE
-# qaroot-api-service-xxx              1/1     Running   0          2m
-# qaroot-websocket-service-xxx        1/1     Running   0          2m
-# qaroot-worker-pool-xxx              1/1     Running   0          2m
-# qaroot-frontend-xxx                 1/1     Running   0          2m
-# qaroot-postgresql-0                 1/1     Running   0          2m
-# qaroot-redis-xxx                    1/1     Running   0          2m
-# qaroot-amq-xxx                      1/1     Running   0          2m
+# NAME                                         READY   STATUS      RESTARTS   AGE
+# amq-broker-controller-manager-xxx            1/1     Running     0          10m
+# db-migrations-xxx                            0/1     Completed   0          10m
+# postgresql-xxx                               1/1     Running     0          10m
+# qaroot-api-service-xxx                       1/1     Running     0          5m
+# qaroot-frontend-xxx                          1/1     Running     0          5m
+# qaroot-websocket-service-xxx                 1/1     Running     0          5m
+# qaroot-worker-pool-xxx                       1/1     Running     0          5m
+# rabbitmq-xxx                                 1/1     Running     0          8m
+# redis-xxx                                    1/1     Running     0          10m
 
 # Check services
 oc get svc -n qaroot-mvp
@@ -134,78 +190,32 @@ Open the route URL in your browser:
 https://qaroot-frontend-qaroot-mvp.apps.your-cluster.com
 ```
 
-Default login credentials:
+Default login credentials (as configured in app-credentials secret):
 - Username: `admin`
-- Password: `changeme123`
+- Password: `admin123` (change this in production!)
 
 ## Configuration
-
-### Custom Values
-
-Create a `values-custom.yaml` file:
-
-```yaml
-# values-custom.yaml
-global:
-  domain: apps.your-cluster.com
-
-frontend:
-  replicas: 2
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-    requests:
-      cpu: 100m
-      memory: 256Mi
-
-apiService:
-  replicas: 2
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 1Gi
-    requests:
-      cpu: 200m
-      memory: 512Mi
-
-postgresql:
-  persistence:
-    size: 20Gi
-    storageClass: gp3-csi
-
-redis:
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-
-amq:
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 2Gi
-```
-
-Install with custom values:
-
-```bash
-helm install qaroot deployment/helm/qaroot \
-  -n qaroot-mvp \
-  -f values-custom.yaml
-```
 
 ### Update Configuration
 
 ```bash
-# Update secrets
+# Update LLM configuration
 oc delete secret llm-config -n qaroot-mvp
 oc create secret generic llm-config \
   --from-literal=EXTERNAL_LLM_URL='https://new-endpoint/v1' \
-  --from-literal=EXTERNAL_LLM_API_KEY='new-key'
+  --from-literal=EXTERNAL_LLM_API_KEY='new-key' \
+  --from-literal=CHAT_MODEL='gpt-4' \
+  --from-literal=USE_LOCAL_EMBEDDINGS='true' \
+  --from-literal=LLM_TIMEOUT='60000' \
+  --from-literal=CLUSTERING_THRESHOLD='0.65'
 
-# Restart pods to pick up new secrets
-oc rollout restart deployment/qaroot-api-service -n qaroot-mvp
+# Restart worker pool to pick up new LLM config
+oc rollout restart deployment/qaroot-worker-pool -n qaroot-mvp
+
+# Update clustering threshold only
+oc patch secret llm-config -n qaroot-mvp \
+  --type='json' \
+  -p='[{"op": "replace", "path": "/data/CLUSTERING_THRESHOLD", "value": "'$(echo -n "0.65" | base64)'"}]'
 oc rollout restart deployment/qaroot-worker-pool -n qaroot-mvp
 ```
 
@@ -227,7 +237,7 @@ oc logs -f deployment/qaroot-worker-pool -n qaroot-mvp
 oc logs -f deployment/qaroot-frontend -n qaroot-mvp
 
 # Database logs
-oc logs -f statefulset/qaroot-postgresql -n qaroot-mvp
+oc logs -f deployment/postgresql -n qaroot-mvp
 ```
 
 ### Check Pod Status
@@ -265,15 +275,17 @@ curl -v https://your-llm-endpoint/v1/models
 
 ```bash
 # Check PostgreSQL status
-oc get statefulset qaroot-postgresql -n qaroot-mvp
+oc get deployment postgresql -n qaroot-mvp
 
 # Connect to database
-oc rsh statefulset/qaroot-postgresql
-psql -U qaroot -d qaroot_mvp
+oc exec -it deployment/postgresql -n qaroot-mvp -- psql -U qaroot -d qaroot_mvp
 
-# Run migrations manually if needed
-oc rsh deployment/qaroot-api-service
-npm run migrate
+# Check if migrations ran
+oc get job db-migrations -n qaroot-mvp
+oc logs job/db-migrations -n qaroot-mvp
+
+# Verify database schema
+oc exec deployment/postgresql -n qaroot-mvp -- psql -U qaroot -d qaroot_mvp -c "\dt"
 ```
 
 ### WebSocket Issues
@@ -323,41 +335,15 @@ oc autoscale deployment qaroot-worker-pool \
   -n qaroot-mvp
 ```
 
-## Backup and Restore
-
-### Backup Database
-
-```bash
-# Create backup
-oc rsh statefulset/qaroot-postgresql
-pg_dump -U qaroot qaroot_mvp > /tmp/backup.sql
-exit
-
-# Copy backup out
-oc cp qaroot-mvp/qaroot-postgresql-0:/tmp/backup.sql ./backup-$(date +%Y%m%d).sql
-```
-
-### Restore Database
-
-```bash
-# Copy backup to pod
-oc cp ./backup.sql qaroot-mvp/qaroot-postgresql-0:/tmp/backup.sql
-
-# Restore
-oc rsh statefulset/qaroot-postgresql
-psql -U qaroot -d qaroot_mvp < /tmp/backup.sql
-```
 
 ## Upgrade
 
 ```bash
-# Pull latest charts
+# Pull latest manifests
 git pull origin main
 
-# Upgrade deployment
-helm upgrade qaroot deployment/helm/qaroot \
-  -n qaroot-mvp \
-  -f values-custom.yaml
+# Apply updated manifests
+oc apply -f deployment/openshift/ -n qaroot-mvp
 
 # Check rollout status
 oc rollout status deployment/qaroot-api-service -n qaroot-mvp
@@ -369,8 +355,8 @@ oc rollout status deployment/qaroot-frontend -n qaroot-mvp
 ## Uninstall
 
 ```bash
-# Uninstall Helm release
-helm uninstall qaroot -n qaroot-mvp
+# Delete all resources
+oc delete -f deployment/openshift/ -n qaroot-mvp
 
 # Delete secrets (optional)
 oc delete secret llm-config -n qaroot-mvp

@@ -1,0 +1,112 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qaroot-api-service
+  namespace: qaroot-mvp
+  labels:
+    app: qaroot-api-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qaroot-api-service
+  template:
+    metadata:
+      labels:
+        app: qaroot-api-service
+    spec:
+      containers:
+      - name: api-service
+        image: quay.io/hayesphilip/qaroot-api-service:latest
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: PORT
+          value: "3000"
+        - name: DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: username
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: database
+        - name: DATABASE_URL
+          value: "postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@postgresql:5432/$(DATABASE_NAME)"
+        - name: REDIS_HOST
+          value: redis
+        - name: REDIS_PORT
+          value: "6379"
+        - name: AMQ_URL
+          value: "amqp://rabbitmq:5672"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-credentials
+              key: jwt-secret
+        - name: SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-credentials
+              key: session-secret
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 200m
+          limits:
+            memory: 1Gi
+            cpu: 1000m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qaroot-api-service
+  namespace: qaroot-mvp
+  labels:
+    app: qaroot-api-service
+spec:
+  selector:
+    app: qaroot-api-service
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: qaroot-api-service
+  namespace: qaroot-mvp
+spec:
+  to:
+    kind: Service
+    name: qaroot-api-service
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
