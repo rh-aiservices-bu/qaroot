@@ -116,6 +116,7 @@ export function handleHostEvents(io: Server, socket: HostSocket) {
         session_id,
         started_at: startedAt || new Date(),
         description,
+        timer_duration: timerDuration,
       });
     } catch (error) {
       console.error('Error starting collection timer:', error);

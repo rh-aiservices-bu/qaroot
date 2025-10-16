@@ -78,6 +78,16 @@ export function handleParticipantEvents(io: Server, socket: Socket) {
         io.to(`session:${actualSessionId}:host`).emit('participant:joined', participant);
       }
 
+      // If collection is active, immediately send collection:started event to this socket
+      if (session.session_status === 'active') {
+        socket.emit('collection:started', {
+          session_id: actualSessionId,
+          started_at: session.collection_started_at || new Date(),
+          description: session.description,
+          timer_duration: session.collection_timer_duration || 60,
+        });
+      }
+
       callback?.({ success: true, participant, session });
     } catch (error) {
       console.error('Participant join error:', error);

@@ -29,9 +29,28 @@ export default function JoinPage() {
   useEffect(() => {
     const socket = connectSocket();
 
+    // Rejoin session on reconnect
+    const handleReconnect = () => {
+      if (joined && sessionId) {
+        console.log('Socket reconnected, rejoining session...');
+        socket.emit('participant:join', { session_id: sessionId, nickname: nickname.trim() || 'Anonymous' }, (response: any) => {
+          if (response.error) {
+            console.error('Failed to rejoin session:', response.error);
+          } else {
+            console.log('Successfully rejoined session');
+          }
+        });
+      }
+    };
+
+    socket.on('connect', handleReconnect);
+
     socket.on('collection:started', (data: any) => {
       setSessionStatus('active');
       setCollectionStartedAt(data.started_at || new Date().toISOString());
+      if (data.timer_duration !== undefined) {
+        setTimerDuration(data.timer_duration);
+      }
       if (data.description) {
         setSessionDescription(data.description);
         setSuccess('New topic: ' + data.description);
@@ -60,11 +79,12 @@ export default function JoinPage() {
     });
 
     return () => {
+      socket.off('connect', handleReconnect);
       socket.off('collection:started');
       socket.off('collection:ended');
       socket.off('session:update');
     };
-  }, []);
+  }, [joined, sessionId, nickname]);
 
   // Timer countdown effect
   useEffect(() => {

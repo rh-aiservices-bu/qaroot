@@ -66,13 +66,15 @@ router.post('/', authenticate, requireRole('facilitator', 'host', 'admin'), asyn
     const session = result.rows[0];
 
     // Store the initial question in iteration_questions table (iteration 1)
-    if (description && description.trim().length > 0) {
-      await pool.query(
-        `INSERT INTO iteration_questions (session_id, iteration, question_text)
-         VALUES ($1, 1, $2)`,
-        [session.id, description.trim()]
-      );
-    }
+    // Always insert with a meaningful default so AI assistant has topic context
+    const topicText = (description && description.trim()) || session.title || 'General feedback';
+    await pool.query(
+      `INSERT INTO iteration_questions (session_id, iteration, question_text)
+       VALUES ($1, 1, $2)
+       ON CONFLICT (session_id, iteration) DO UPDATE
+       SET question_text = EXCLUDED.question_text`,
+      [session.id, topicText]
+    );
 
     // Generate QR code for joining
     const joinUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/join/${pin}`;
@@ -452,12 +454,15 @@ router.post('/:id/chat', authenticate, async (req: AuthRequest, res: Response) =
     const questions = questionsResult.rows;
 
     // Get the topic for this iteration
+    console.log('[AI Chat] Session:', id, 'Iteration:', iteration);
     const iterationQuestionResult = await pool.query(
       `SELECT question_text FROM iteration_questions WHERE session_id = $1 AND iteration = $2`,
       [id, iteration]
     );
+    console.log('[AI Chat] Topic query result:', iterationQuestionResult.rows);
 
     const topicText = iterationQuestionResult.rows[0]?.question_text || 'N/A';
+    console.log('[AI Chat] Final topicText:', topicText);
 
     // Calculate statistics about participants and responses
     const uniqueParticipants = new Set(questions.map(q => q.participant_nickname || 'Anonymous'));

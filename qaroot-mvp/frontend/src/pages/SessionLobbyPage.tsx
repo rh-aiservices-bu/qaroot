@@ -57,6 +57,13 @@ export default function SessionLobbyPage() {
     const socket = connectSocket();
     const token = localStorage.getItem('auth_token');
 
+    // Rejoin on reconnect
+    const handleReconnect = () => {
+      console.log('Socket reconnected, rejoining as host...');
+      socket.emit('host:join', { session_id: id, token });
+    };
+
+    socket.on('connect', handleReconnect);
     socket.emit('host:join', { session_id: id, token });
 
     // Listen for new questions
@@ -79,6 +86,7 @@ export default function SessionLobbyPage() {
     });
 
     return () => {
+      socket.off('connect', handleReconnect);
       socket.off('question:new');
       socket.off('participant:joined');
       socket.off('participant:left');
@@ -127,6 +135,14 @@ export default function SessionLobbyPage() {
     const interval = setInterval(() => {
       setTimeRemaining((prev) => {
         if (prev === null || prev <= 0) {
+          // Timer expired - poll API to get updated session status
+          if (prev === 0 && id) {
+            sessionsAPI.get(id).then((response) => {
+              setSession(response.data.session);
+            }).catch((err) => {
+              console.error('Failed to refresh session after timer expired:', err);
+            });
+          }
           return 0;
         }
         return prev - 1;
@@ -134,7 +150,7 @@ export default function SessionLobbyPage() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [session?.session_status, session?.collection_started_at, session?.collection_timer_duration]);
+  }, [session?.session_status, session?.collection_started_at, session?.collection_timer_duration, id]);
 
   const handleStartCollection = async () => {
     if (!id) return;
