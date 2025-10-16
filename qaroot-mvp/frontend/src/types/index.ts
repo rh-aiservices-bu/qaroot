@@ -23,6 +23,7 @@ export interface Session {
   settings?: Record<string, unknown>;
   participant_count: number;
   question_count: number;
+  topic_count?: number;
   current_iteration: number;
   iteration_count?: number;
   iterations?: Array<{ iteration: number; count: number }>;

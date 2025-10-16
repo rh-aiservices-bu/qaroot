@@ -175,6 +175,7 @@ export default function DashboardPage() {
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <Badge isRead>{session.topic_count || 0} {session.topic_count === 1 ? 'topic' : 'topics'}</Badge>
                           <Badge isRead>{session.question_count || 0} total responses</Badge>
                           <Button
                             variant="danger"

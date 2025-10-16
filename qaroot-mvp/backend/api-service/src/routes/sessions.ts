@@ -16,7 +16,8 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
 
     const result = await pool.query(
       `SELECT s.*,
-        (SELECT COUNT(*) FROM questions WHERE session_id = s.id) as question_count
+        (SELECT COUNT(*) FROM questions WHERE session_id = s.id) as question_count,
+        (SELECT COUNT(DISTINCT iteration) FROM iteration_questions WHERE session_id = s.id) as topic_count
        FROM sessions s
        WHERE s.host_id = $1
        ORDER BY s.created_at DESC`,
