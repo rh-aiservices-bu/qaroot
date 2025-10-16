@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qaroot-frontend
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-frontend
 spec:
@@ -22,11 +22,7 @@ spec:
         ports:
         - containerPort: 8080
           name: http
-        env:
-        - name: VITE_API_URL
-          value: "https://qaroot-api-service-qaroot-mvp.apps.dev.rhoai.rh-aiservices-bu.com"
-        - name: VITE_WS_URL
-          value: "wss://qaroot-websocket-qaroot-mvp.apps.dev.rhoai.rh-aiservices-bu.com"
+        # No environment variables needed - nginx proxies to internal services
         resources:
           requests:
             memory: 256Mi
@@ -51,7 +47,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: qaroot-frontend
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-frontend
 spec:
@@ -67,7 +63,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: qaroot-frontend
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-frontend
 spec:

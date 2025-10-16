@@ -39,40 +39,40 @@ amq:
 oc create namespace qaroot-mvp
 
 # Install with default values
-helm install qaroot ./qaroot -n qaroot-mvp
+helm install qaroot ./qaroot -n $PROJECT
 
 # Or install with custom values
-helm install qaroot ./qaroot -n qaroot-mvp -f values-production.yaml
+helm install qaroot ./qaroot -n $PROJECT -f values-production.yaml
 ```
 
 ### 3. Verify Installation
 
 ```bash
 # Check pods
-oc get pods -n qaroot-mvp
+oc get pods -n $PROJECT
 
 # Check services
-oc get svc -n qaroot-mvp
+oc get svc -n $PROJECT
 
 # Check routes
-oc get routes -n qaroot-mvp
+oc get routes -n $PROJECT
 ```
 
 ## Upgrade
 
 ```bash
 # Upgrade with new values
-helm upgrade qaroot ./qaroot -n qaroot-mvp -f values-production.yaml
+helm upgrade qaroot ./qaroot -n $PROJECT -f values-production.yaml
 
 # Upgrade with inline overrides
-helm upgrade qaroot ./qaroot -n qaroot-mvp \
+helm upgrade qaroot ./qaroot -n $PROJECT \
   --set images.apiService.tag=v1.1.0
 ```
 
 ## Uninstall
 
 ```bash
-helm uninstall qaroot -n qaroot-mvp
+helm uninstall qaroot -n $PROJECT
 
 # Optionally delete namespace
 oc delete namespace qaroot-mvp
@@ -98,7 +98,7 @@ See [values.yaml](values.yaml) for all configurable parameters.
 ### Dry run to check templates
 
 ```bash
-helm install qaroot ./qaroot -n qaroot-mvp --dry-run --debug
+helm install qaroot ./qaroot -n $PROJECT --dry-run --debug
 ```
 
 ### Check generated manifests
@@ -110,5 +110,5 @@ helm template qaroot ./qaroot > manifests.yaml
 ### Rollback to previous version
 
 ```bash
-helm rollback qaroot -n qaroot-mvp
+helm rollback qaroot -n $PROJECT
 ```

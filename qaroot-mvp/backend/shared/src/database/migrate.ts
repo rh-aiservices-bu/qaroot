@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getPool } from './pool';
 import * as bcrypt from 'bcrypt';
@@ -10,13 +10,19 @@ async function runMigrations() {
   try {
     console.log('Running database migrations...');
 
-    // Run initial schema migration
-    const initSql = readFileSync(
-      join(__dirname, '../../database/migrations/001_init.sql'),
-      'utf-8'
-    );
-    await client.query(initSql);
-    console.log('✓ Schema created');
+    // Get all migration files
+    const migrationsDir = join(__dirname, '../../database/migrations');
+    const migrationFiles = readdirSync(migrationsDir)
+      .filter(file => file.endsWith('.sql'))
+      .sort(); // Ensure migrations run in order
+
+    // Run each migration file
+    for (const file of migrationFiles) {
+      console.log(`Running migration: ${file}`);
+      const sql = readFileSync(join(migrationsDir, file), 'utf-8');
+      await client.query(sql);
+      console.log(`✓ ${file} completed`);
+    }
 
     // Seed admin user with credentials from environment
     const adminUsername = process.env.ADMIN_USERNAME || 'admin';

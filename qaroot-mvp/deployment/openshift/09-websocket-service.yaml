@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qaroot-websocket-service
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-websocket-service
 spec:
@@ -73,7 +73,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: qaroot-websocket-service
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-websocket-service
 spec:
@@ -84,21 +84,3 @@ spec:
     port: 3001
     targetPort: 3001
   type: ClusterIP
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: qaroot-websocket
-  namespace: qaroot-mvp
-  labels:
-    app: qaroot-websocket-service
-spec:
-  to:
-    kind: Service
-    name: qaroot-websocket-service
-  port:
-    targetPort: websocket
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-  websockets: true

@@ -16,6 +16,7 @@ export function handleHostEvents(io: Server, socket: HostSocket) {
   socket.on('host:join', async (data: { session_id: string; token: string }, callback) => {
     try {
       const { session_id, token } = data;
+      console.log('[Host] Join request:', { session_id, has_token: !!token });
 
       if (!session_id || !token) {
         return callback?.({ error: 'Session ID and token are required' });
@@ -25,12 +26,15 @@ export function handleHostEvents(io: Server, socket: HostSocket) {
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
         socket.userId = decoded.id;
+        console.log('[Host] Token verified for user:', decoded.id);
       } catch (error) {
+        console.error('[Host] Token verification failed:', error);
         return callback?.({ error: 'Invalid or expired token' });
       }
 
       // Join host room for this session
       socket.join(`session:${session_id}:host`);
+      console.log('[Host] Joined room:', `session:${session_id}:host`);
 
       callback?.({ success: true });
     } catch (error) {
@@ -44,6 +48,7 @@ export function handleHostEvents(io: Server, socket: HostSocket) {
    */
   socket.on('collection:start', async (data: { session_id: string }) => {
     const { session_id } = data;
+    console.log('[collection:start] Event received for session:', session_id);
 
     try {
       const pool = getPool();
@@ -64,7 +69,7 @@ export function handleHostEvents(io: Server, socket: HostSocket) {
       const startedAt = session.collection_started_at;
       const description = session.description;
 
-      console.log(`[collection:start] Session ${session_id}: timer duration = ${timerDuration}s, started_at = ${startedAt}`);
+      console.log(`[collection:start] Session ${session_id}: timer duration = ${timerDuration}s, started_at = ${startedAt}, description = ${description}`);
 
       // Clear any existing timer for this session
       if (activeTimers.has(session_id)) {

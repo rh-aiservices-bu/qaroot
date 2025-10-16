@@ -105,20 +105,20 @@ oc create secret generic llm-config \
 
 ```bash
 # Check all pods are running
-oc get pods -n qaroot-mvp
+oc get pods -n $PROJECT
 
 # View worker logs (shows LLM processing)
-oc logs -f deployment/qaroot-worker-pool -n qaroot-mvp
+oc logs -f deployment/qaroot-worker-pool -n $PROJECT
 
 # Get application URL
-oc get route qaroot-frontend -n qaroot-mvp
+oc get route qaroot-frontend -n $PROJECT
 ```
 
 ## Update LLM Configuration
 
 ```bash
 # Delete existing secret
-oc delete secret llm-config -n qaroot-mvp
+oc delete secret llm-config -n $PROJECT
 
 # Create new secret with updated values
 oc create secret generic llm-config \
@@ -126,26 +126,26 @@ oc create secret generic llm-config \
   --from-literal=EXTERNAL_LLM_API_KEY='new-key'
 
 # Restart worker pods to pick up new config
-oc rollout restart deployment/qaroot-worker-pool -n qaroot-mvp
-oc rollout restart deployment/qaroot-api-service -n qaroot-mvp
+oc rollout restart deployment/qaroot-worker-pool -n $PROJECT
+oc rollout restart deployment/qaroot-api-service -n $PROJECT
 ```
 
 ## Troubleshooting Commands
 
 ```bash
 # Check pod status
-oc get pods -n qaroot-mvp
+oc get pods -n $PROJECT
 
 # View logs
-oc logs -f deployment/qaroot-worker-pool -n qaroot-mvp
-oc logs -f deployment/qaroot-api-service -n qaroot-mvp
-oc logs -f deployment/qaroot-websocket-service -n qaroot-mvp
+oc logs -f deployment/qaroot-worker-pool -n $PROJECT
+oc logs -f deployment/qaroot-api-service -n $PROJECT
+oc logs -f deployment/qaroot-websocket-service -n $PROJECT
 
 # Check events
-oc get events -n qaroot-mvp --sort-by='.lastTimestamp'
+oc get events -n $PROJECT --sort-by='.lastTimestamp'
 
 # Describe pod for detailed info
-oc describe pod <pod-name> -n qaroot-mvp
+oc describe pod <pod-name> -n $PROJECT
 
 # Test LLM connectivity from worker pod
 oc rsh deployment/qaroot-worker-pool
@@ -156,24 +156,24 @@ curl -v $EXTERNAL_LLM_URL/models -H "Authorization: Bearer $EXTERNAL_LLM_API_KEY
 
 ```bash
 # Scale API service
-oc scale deployment qaroot-api-service --replicas=3 -n qaroot-mvp
+oc scale deployment qaroot-api-service --replicas=3 -n $PROJECT
 
 # Scale worker pool
-oc scale deployment qaroot-worker-pool --replicas=2 -n qaroot-mvp
+oc scale deployment qaroot-worker-pool --replicas=2 -n $PROJECT
 
 # Scale frontend
-oc scale deployment qaroot-frontend --replicas=3 -n qaroot-mvp
+oc scale deployment qaroot-frontend --replicas=3 -n $PROJECT
 ```
 
 ## Uninstall
 
 ```bash
 # Uninstall Helm release
-helm uninstall qaroot -n qaroot-mvp
+helm uninstall qaroot -n $PROJECT
 
 # Delete secrets
-oc delete secret llm-config -n qaroot-mvp
-oc delete secret qaroot-secrets -n qaroot-mvp
+oc delete secret llm-config -n $PROJECT
+oc delete secret qaroot-secrets -n $PROJECT
 
 # Delete entire project
 oc delete project qaroot-mvp
@@ -187,7 +187,7 @@ Default credentials:
 
 Get URL:
 ```bash
-oc get route qaroot-frontend -n qaroot-mvp
+oc get route qaroot-frontend -n $PROJECT
 ```
 
 ## Required Secrets Summary

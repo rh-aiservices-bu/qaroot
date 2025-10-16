@@ -1,6 +1,6 @@
 # Global settings
 global:
-  namespace: qaroot-mvp
+
   domain: qaroot.university.edu
 
 # Image settings

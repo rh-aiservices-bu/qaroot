@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qaroot-api-service
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-api-service
 spec:
@@ -109,7 +109,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: qaroot-api-service
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-api-service
 spec:
@@ -120,18 +120,3 @@ spec:
     port: 3000
     targetPort: 3000
   type: ClusterIP
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: qaroot-api-service
-  namespace: qaroot-mvp
-spec:
-  to:
-    kind: Service
-    name: qaroot-api-service
-  port:
-    targetPort: http
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect

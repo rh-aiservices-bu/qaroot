@@ -3,7 +3,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: db-migrations
-  namespace: qaroot-mvp
+
 spec:
   template:
     spec:
@@ -48,6 +48,7 @@ spec:
           psql << 'EOF'
           -- Enable required extensions
           CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "vector";
           CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
           -- Users table
@@ -117,7 +118,7 @@ spec:
             session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
             participant_id UUID REFERENCES participants(id) ON DELETE SET NULL,
             question_text TEXT NOT NULL,
-            embedding float[],
+            embedding vector,
             cluster_id UUID,
             submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             iteration INTEGER DEFAULT 1
@@ -134,7 +135,7 @@ spec:
             cluster_label VARCHAR(255),
             representative_question TEXT,
             question_count INTEGER DEFAULT 0,
-            centroid_embedding float[],
+            centroid_embedding vector,
             iteration INTEGER DEFAULT 1,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
           );
@@ -206,9 +207,11 @@ spec:
 
           # Create default admin user (password: admin123)
           psql << 'EOF'
-          INSERT INTO users (email, password_hash, role)
-          VALUES ('admin@qaroot.com', '$2b$10$rN5L8KqJXqVXqKZy4nYYb.7MRl6lZVJ8qQl3kJN9eJvYKNJn.Hm8O', 'host')
-          ON CONFLICT (email) DO NOTHING;
+          INSERT INTO users (email, username, password_hash, full_name, role, is_active)
+          VALUES ('admin@qaroot.com', 'admin', '$2b$10$bkXSGRlikfqsmg6va.OnCOO7k2TECBR/T26xCcFl3Cv0U/wxJY/rG', 'System Administrator', 'admin', true)
+          ON CONFLICT (email) DO UPDATE
+          SET username = EXCLUDED.username,
+              password_hash = EXCLUDED.password_hash;
           EOF
 
           echo "Migrations completed successfully!"

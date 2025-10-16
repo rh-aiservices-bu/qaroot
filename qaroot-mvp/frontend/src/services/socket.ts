@@ -2,7 +2,9 @@ import { io, Socket } from 'socket.io-client';
 
 // Runtime config from window.ENV or build-time env
 // @ts-ignore
-const WS_URL = (typeof window !== 'undefined' && window.ENV?.VITE_WS_URL) || import.meta.env.VITE_WS_URL || 'http://localhost:3001';
+const WS_URL = (typeof window !== 'undefined' && window.ENV?.VITE_WS_URL !== undefined)
+  ? window.ENV.VITE_WS_URL
+  : (import.meta.env.VITE_WS_URL || 'http://localhost:3001');
 
 console.log('WS_URL:', WS_URL);
 

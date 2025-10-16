@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qaroot-worker-pool
-  namespace: qaroot-mvp
+
   labels:
     app: qaroot-worker-pool
 spec:
@@ -39,18 +39,8 @@ spec:
               key: database
         - name: DATABASE_URL
           value: "postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@postgresql:5432/$(DATABASE_NAME)"
-        - name: AMQ_USER
-          valueFrom:
-            secretKeyRef:
-              name: amq-credentials
-              key: username
-        - name: AMQ_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: amq-credentials
-              key: password
         - name: AMQ_URL
-          value: "amqp://rabbitmq:5672"
+          value: "amqp://guest:guest@rabbitmq:5672"
         - name: EXTERNAL_LLM_URL
           valueFrom:
             secretKeyRef:

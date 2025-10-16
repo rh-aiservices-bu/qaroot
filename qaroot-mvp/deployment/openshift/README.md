@@ -56,7 +56,7 @@ oc apply -f 06-llama-stack.yaml
 Wait for all infrastructure pods to be ready:
 
 ```bash
-oc get pods -n qaroot-mvp -w
+oc get pods -n $PROJECT -w
 ```
 
 ### 5. Run Database Migrations
@@ -65,10 +65,10 @@ Once PostgreSQL is running, execute migrations:
 
 ```bash
 # Get the PostgreSQL pod name
-POD_NAME=$(oc get pods -n qaroot-mvp -l app=postgresql -o jsonpath='{.items[0].metadata.name}')
+POD_NAME=$(oc get pods -n $PROJECT -l app=postgresql -o jsonpath='{.items[0].metadata.name}')
 
 # Connect to PostgreSQL and run migrations
-oc exec -n qaroot-mvp -it $POD_NAME -- psql -U qaroot -d qaroot_mvp -f /path/to/migrations/001_init.sql
+oc exec -n $PROJECT -it $POD_NAME -- psql -U qaroot -d qaroot_mvp -f /path/to/migrations/001_init.sql
 ```
 
 Or run migrations from the API service once deployed.
@@ -82,19 +82,19 @@ After deploying with Helm (see [../helm/README.md](../helm/README.md)), or manua
 Check all pods are running:
 
 ```bash
-oc get pods -n qaroot-mvp
+oc get pods -n $PROJECT
 ```
 
 Check services:
 
 ```bash
-oc get svc -n qaroot-mvp
+oc get svc -n $PROJECT
 ```
 
 Check routes (if configured):
 
 ```bash
-oc get routes -n qaroot-mvp
+oc get routes -n $PROJECT
 ```
 
 ## Troubleshooting
@@ -102,20 +102,20 @@ oc get routes -n qaroot-mvp
 ### PostgreSQL not starting
 
 ```bash
-oc logs -n qaroot-mvp deployment/postgresql
-oc describe pod -n qaroot-mvp -l app=postgresql
+oc logs -n $PROJECT deployment/postgresql
+oc describe pod -n $PROJECT -l app=postgresql
 ```
 
 ### AMQ connection issues
 
 ```bash
-oc logs -n qaroot-mvp deployment/amq-broker
+oc logs -n $PROJECT deployment/amq-broker
 ```
 
 ### Llama Stack errors
 
 ```bash
-oc logs -n qaroot-mvp deployment/llama-stack
+oc logs -n $PROJECT deployment/llama-stack
 ```
 
 ## Cleanup

@@ -3,7 +3,9 @@ import type { LoginResponse, CreateSessionResponse, Session, Question, QuestionC
 
 // Runtime config from window.ENV or build-time env
 // @ts-ignore
-const API_URL = (typeof window !== 'undefined' && window.ENV?.VITE_API_URL) || import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = (typeof window !== 'undefined' && window.ENV?.VITE_API_URL !== undefined)
+  ? window.ENV.VITE_API_URL
+  : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
 
 console.log('API_URL:', API_URL);
 
