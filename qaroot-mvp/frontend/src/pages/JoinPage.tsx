@@ -149,14 +149,16 @@ export default function JoinPage() {
   if (!joined) {
     return (
       <div style={{
+        backgroundColor: '#f0f0f0',
+        padding: '1rem',
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        backgroundColor: '#f0f0f0'
+        alignItems: 'flex-start',
+        paddingTop: '2rem',
+        height: '100%'
       }}>
-        <Card style={{ width: '450px', maxWidth: '90%' }}>
-          <CardBody style={{ padding: '2rem' }}>
+        <Card style={{ width: '100%', maxWidth: '450px' }}>
+          <CardBody style={{ padding: '1.5rem' }}>
             <Title headingLevel="h1" size="2xl" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
               Join Session
             </Title>
@@ -191,7 +193,8 @@ export default function JoinPage() {
                   padding: '0.75rem',
                   border: '1px solid #ccc',
                   borderRadius: '4px',
-                  fontSize: '1rem'
+                  fontSize: '1rem',
+                  boxSizing: 'border-box'
                 }}
                 onKeyPress={(e) => e.key === 'Enter' && handleJoin()}
               />
@@ -217,15 +220,16 @@ export default function JoinPage() {
 
   return (
     <div style={{
+      backgroundColor: '#f0f0f0',
+      padding: '1rem',
       display: 'flex',
       justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      backgroundColor: '#f0f0f0',
-      padding: '1rem'
+      alignItems: 'flex-start',
+      paddingTop: '2rem',
+      height: '100%'
     }}>
-      <Card style={{ width: '600px', maxWidth: '100%' }}>
-        <CardBody style={{ padding: '2rem' }}>
+      <Card style={{ width: '100%', maxWidth: '600px' }}>
+        <CardBody style={{ padding: '1.5rem' }}>
           <Title headingLevel="h1" size="xl" style={{ marginBottom: '0.5rem' }}>
             {sessionTitle}
           </Title>
@@ -306,7 +310,8 @@ export default function JoinPage() {
                 borderRadius: '4px',
                 fontSize: '1rem',
                 resize: 'vertical',
-                fontFamily: 'inherit'
+                fontFamily: 'inherit',
+                boxSizing: 'border-box'
               }}
             />
             <div style={{ textAlign: 'right', fontSize: '0.875rem', color: '#666', marginTop: '0.25rem' }}>

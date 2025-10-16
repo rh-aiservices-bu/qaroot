@@ -66,8 +66,8 @@ export const sessionsAPI = {
 
   delete: (id: string) => api.delete(`/sessions/${id}`),
 
-  newQuestion: (id: string, description: string) =>
-    api.post<{ session: Session }>(`/sessions/${id}/new-question`, { description }),
+  newQuestion: (id: string, description: string, collection_timer_duration?: number) =>
+    api.post<{ session: Session }>(`/sessions/${id}/new-question`, { description, collection_timer_duration }),
 
   analyze: (id: string, iteration?: number) => api.post(`/sessions/${id}/analyze`, { iteration }),
 
@@ -84,6 +84,8 @@ export const chatAPI = {
     api.post<{ role: 'assistant'; content: string }>(`/sessions/${sessionId}/chat`, { message, iteration }),
 
   getHistory: (sessionId: string) => api.get<{ messages: ChatMessage[] }>(`/sessions/${sessionId}/chat`),
+
+  getDefaultPrompt: () => api.get<{ prompt: string }>(`/sessions/chat/default-prompt`),
 };
 
 export default api;

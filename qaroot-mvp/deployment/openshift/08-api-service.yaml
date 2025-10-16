@@ -80,6 +80,11 @@ spec:
             secretKeyRef:
               name: llm-config
               key: LLM_TIMEOUT
+        - name: DEFAULT_CHAT_PROMPT
+          valueFrom:
+            secretKeyRef:
+              name: app-config
+              key: DEFAULT_CHAT_PROMPT
         resources:
           requests:
             memory: 512Mi

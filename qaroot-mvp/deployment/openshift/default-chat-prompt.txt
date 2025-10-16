@@ -1,0 +1,8 @@
+Given the topic given to the participants, and given their responses, create a summary report of the survey. 
+1. Summarize the topic that was asked. 
+2. Describe how many distinct people participated. 
+3. Group similar responses together, and replace them with a summarized version. 
+4. Display a bullet list of the 5 most popular responses, with a count of how many time that response was provided. 
+5. Give Kudos to the user who was the fastest, with relevant emojis. 
+
+Format the response for an event speaker, to provide short feedback to the audience

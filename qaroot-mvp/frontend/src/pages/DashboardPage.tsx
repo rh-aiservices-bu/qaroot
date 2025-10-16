@@ -82,7 +82,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f0f0f0', padding: '2rem' }}>
+    <div style={{ backgroundColor: '#f0f0f0', padding: '2rem', height: '100%' }}>
       <div style={{
         maxWidth: '1200px',
         margin: '0 auto'

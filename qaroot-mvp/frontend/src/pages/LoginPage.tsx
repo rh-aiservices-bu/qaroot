@@ -40,8 +40,9 @@ export default function LoginPage() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: '100vh',
-      width: '100vw',
+      padding: '2rem 0',
+      width: '100%',
+      height: '100%',
       backgroundColor: '#f0f0f0'
     }}>
       <Card style={{ width: '400px', maxWidth: '90%' }}>

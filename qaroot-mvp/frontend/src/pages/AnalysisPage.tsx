@@ -54,9 +54,24 @@ export default function AnalysisPage() {
   const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
   const [chatMessagesByIteration, setChatMessagesByIteration] = useState<Map<number, UIChatMessage[]>>(new Map());
   const [chatInput, setChatInput] = useState('');
+  const [defaultPrompt, setDefaultPrompt] = useState('');
   const [chatExpanded, setChatExpanded] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Fetch default chat prompt on mount
+  useEffect(() => {
+    const fetchDefaultPrompt = async () => {
+      try {
+        const response = await chatAPI.getDefaultPrompt();
+        setDefaultPrompt(response.data.prompt);
+        setChatInput(response.data.prompt); // Pre-populate the input
+      } catch (err) {
+        console.error('Failed to fetch default prompt:', err);
+      }
+    };
+    fetchDefaultPrompt();
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -298,8 +313,8 @@ export default function AnalysisPage() {
 
   return (
     <div style={{
-      minHeight: '100vh',
       backgroundColor: '#f0f0f0',
+      height: '100%',
     }}>
       {/* Header */}
       <div style={{ backgroundColor: '#fff', borderBottom: '1px solid #d2d2d2', padding: '1rem 2rem' }}>
@@ -455,12 +470,12 @@ export default function AnalysisPage() {
                     </div>
 
                     {/* Chat Input */}
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       <TextArea
                         value={chatInput}
                         onChange={(e) => setChatInput((e.target as HTMLTextAreaElement).value)}
                         placeholder="Ask about the responses..."
-                        rows={3}
+                        rows={5}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
@@ -468,16 +483,25 @@ export default function AnalysisPage() {
                           }
                         }}
                         isDisabled={chatLoading || currentRound.questions.length === 0}
-                        style={{ flex: 1 }}
                       />
-                      <Button
-                        variant="primary"
-                        onClick={handleSendChat}
-                        isDisabled={!chatInput.trim() || chatLoading || currentRound.questions.length === 0}
-                        style={{ alignSelf: 'flex-end' }}
-                      >
-                        {chatLoading ? <Spinner size="md" /> : 'Send'}
-                      </Button>
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        {defaultPrompt && (
+                          <Button
+                            variant="secondary"
+                            onClick={() => setChatInput(defaultPrompt)}
+                            isDisabled={chatLoading}
+                          >
+                            Reset to Default
+                          </Button>
+                        )}
+                        <Button
+                          variant="primary"
+                          onClick={handleSendChat}
+                          isDisabled={!chatInput.trim() || chatLoading || currentRound.questions.length === 0}
+                        >
+                          {chatLoading ? <Spinner size="md" /> : 'Send'}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </ExpandableSection>

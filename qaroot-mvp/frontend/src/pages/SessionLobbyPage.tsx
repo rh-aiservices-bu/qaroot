@@ -9,7 +9,9 @@ import {
   Spinner,
   Modal,
   ModalVariant,
+  Tooltip,
 } from '@patternfly/react-core';
+import { CopyIcon } from '@patternfly/react-icons';
 import QRCode from 'qrcode';
 import { sessionsAPI } from '../services/api';
 import { connectSocket } from '../services/socket';
@@ -26,6 +28,8 @@ export default function SessionLobbyPage() {
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [showNewQuestionModal, setShowNewQuestionModal] = useState(false);
   const [newQuestionDescription, setNewQuestionDescription] = useState('');
+  const [newQuestionTimerDuration, setNewQuestionTimerDuration] = useState(60);
+  const [urlCopied, setUrlCopied] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -163,10 +167,11 @@ export default function SessionLobbyPage() {
   const handleNewQuestion = async () => {
     if (!id || !newQuestionDescription.trim()) return;
     try {
-      const response = await sessionsAPI.newQuestion(id, newQuestionDescription);
+      const response = await sessionsAPI.newQuestion(id, newQuestionDescription, newQuestionTimerDuration);
       setSession(response.data.session);
       setShowNewQuestionModal(false);
       setNewQuestionDescription('');
+      setNewQuestionTimerDuration(60); // Reset to default
       const socket = connectSocket();
       socket.emit('collection:start', { session_id: id });
     } catch (err) {
@@ -174,9 +179,19 @@ export default function SessionLobbyPage() {
     }
   };
 
+  const handleCopyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(qrCodeUrl);
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy URL:', err);
+    }
+  };
+
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4rem', height: '100%', backgroundColor: '#f0f0f0' }}>
         <Spinner size="xl" />
       </div>
     );
@@ -184,7 +199,7 @@ export default function SessionLobbyPage() {
 
   if (!session) {
     return (
-      <div style={{ padding: '2rem', textAlign: 'center' }}>
+      <div style={{ padding: '2rem', textAlign: 'center', height: '100%', backgroundColor: '#f0f0f0' }}>
         <Title headingLevel="h1">Session not found</Title>
       </div>
     );
@@ -196,7 +211,7 @@ export default function SessionLobbyPage() {
   const isCompleted = session.session_status === 'completed';
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
+    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem', height: '100%' }}>
       {/* Header */}
       <div style={{ marginBottom: '2rem' }}>
         {/* Breadcrumb */}
@@ -233,9 +248,26 @@ export default function SessionLobbyPage() {
                   <Title headingLevel="h3" size="xl">
                     PIN: {session.session_pin}
                   </Title>
-                  <p style={{ marginTop: '0.5rem', color: '#666' }}>
-                    {qrCodeUrl}
-                  </p>
+                  <div style={{
+                    marginTop: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    <p style={{ color: '#666', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {qrCodeUrl}
+                    </p>
+                    <Tooltip content={urlCopied ? 'Copied!' : 'Copy URL'}>
+                      <Button
+                        variant="plain"
+                        onClick={handleCopyUrl}
+                        icon={<CopyIcon />}
+                        style={{ minWidth: 'auto', padding: '0.25rem', flexShrink: 0 }}
+                        aria-label="Copy URL"
+                      />
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
             </CardBody>
@@ -354,7 +386,28 @@ export default function SessionLobbyPage() {
               lineHeight: '1.5'
             }}
           />
-          <p style={{ fontSize: '0.875rem', color: '#6a6e73', marginTop: '0.75rem', marginBottom: '1.5rem', lineHeight: '1.4' }}>
+          <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+            <label htmlFor="new-timer-duration" style={{ display: 'block', marginBottom: '0.75rem', fontWeight: 600 }}>
+              Collection Timer (seconds)
+            </label>
+            <input
+              id="new-timer-duration"
+              type="number"
+              value={newQuestionTimerDuration}
+              onChange={(e) => setNewQuestionTimerDuration(parseInt(e.target.value, 10) || 60)}
+              min={30}
+              max={300}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #d2d2d2',
+                borderRadius: '4px',
+                fontSize: '1rem',
+                boxSizing: 'border-box'
+              }}
+            />
+          </div>
+          <p style={{ fontSize: '0.875rem', color: '#6a6e73', marginBottom: '1.5rem', lineHeight: '1.4' }}>
             This will start a new round of question collection. Previous questions will be preserved.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>

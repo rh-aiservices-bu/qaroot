@@ -36,7 +36,7 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
  */
 router.post('/', authenticate, requireRole('facilitator', 'host', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const { title, description }: CreateSessionRequest = req.body;
+    const { title, description, collection_timer_duration }: CreateSessionRequest = req.body;
 
     if (!title || title.trim().length === 0) {
       return res.status(400).json({ error: 'Session title is required' });
@@ -54,11 +54,13 @@ router.post('/', authenticate, requireRole('facilitator', 'host', 'admin'), asyn
       attempts++;
     }
 
+    const timerDuration = collection_timer_duration || 60; // Default to 60 seconds if not provided
+
     const result = await pool.query(
-      `INSERT INTO sessions (host_id, title, description, session_pin)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO sessions (host_id, title, description, session_pin, collection_timer_duration)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [req.user!.id, title.trim(), description?.trim() || null, pin]
+      [req.user!.id, title.trim(), description?.trim() || null, pin, timerDuration]
     );
 
     const session = result.rows[0];
@@ -175,25 +177,37 @@ router.post('/:id/end', authenticate, async (req: AuthRequest, res: Response) =>
 router.post('/:id/new-question', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { description } = req.body;
+    const { description, collection_timer_duration } = req.body;
     const pool = getPool();
 
     if (!description || description.trim().length === 0) {
       return res.status(400).json({ error: 'Question description is required' });
     }
 
-    // Increment iteration and update session
-    const result = await pool.query(
-      `UPDATE sessions
+    // Build UPDATE query dynamically based on whether timer duration is provided
+    let updateQuery = `UPDATE sessions
        SET description = $2,
            session_status = 'active',
            collection_started_at = NOW(),
            actual_start = COALESCE(actual_start, NOW()),
-           current_iteration = current_iteration + 1
-       WHERE id = $1 AND host_id = $3
-       RETURNING *`,
-      [id, description.trim(), req.user!.id]
-    );
+           current_iteration = current_iteration + 1`;
+
+    const queryParams: any[] = [id, description.trim()];
+
+    // Add timer duration to update if provided
+    if (collection_timer_duration !== undefined) {
+      updateQuery += `, collection_timer_duration = $${queryParams.length + 1}`;
+      queryParams.push(collection_timer_duration);
+    }
+
+    updateQuery += `
+       WHERE id = $1 AND host_id = $${queryParams.length + 1}
+       RETURNING *`;
+
+    queryParams.push(req.user!.id);
+
+    // Increment iteration and update session
+    const result = await pool.query(updateQuery, queryParams);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Session not found or unauthorized' });
@@ -382,6 +396,20 @@ router.get('/:id/clusters', authenticate, async (req: AuthRequest, res: Response
 });
 
 /**
+ * GET /api/v1/sessions/chat/default-prompt
+ * Get the default chat prompt
+ */
+router.get('/chat/default-prompt', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const defaultPrompt = process.env.DEFAULT_CHAT_PROMPT || '';
+    res.json({ prompt: defaultPrompt });
+  } catch (error: any) {
+    console.error('Get default prompt error:', error);
+    res.status(500).json({ error: 'Failed to get default prompt' });
+  }
+});
+
+/**
  * POST /api/v1/sessions/:id/chat
  * Chat with LLM about session responses
  */
@@ -431,10 +459,27 @@ router.post('/:id/chat', authenticate, async (req: AuthRequest, res: Response) =
 
     const topicText = iterationQuestionResult.rows[0]?.question_text || 'N/A';
 
+    // Calculate statistics about participants and responses
+    const uniqueParticipants = new Set(questions.map(q => q.participant_nickname || 'Anonymous'));
+    const participantCounts = new Map<string, number>();
+    questions.forEach(q => {
+      const participant = q.participant_nickname || 'Anonymous';
+      participantCounts.set(participant, (participantCounts.get(participant) || 0) + 1);
+    });
+    const firstResponder = questions.length > 0 ? (questions[0].participant_nickname || 'Anonymous') : 'N/A';
+
     // Build context for LLM - only include current iteration
     let context = `Session: ${session.title}\n`;
     context += `Topic: ${topicText}\n\n`;
-    context += `Responses (${questions.length}):\n`;
+    context += `Statistics:\n`;
+    context += `- Total responses: ${questions.length}\n`;
+    context += `- Unique participants: ${uniqueParticipants.size}\n`;
+    context += `- First responder: ${firstResponder}\n`;
+    context += `- Responses per participant:\n`;
+    participantCounts.forEach((count, participant) => {
+      context += `  - ${participant}: ${count} response${count > 1 ? 's' : ''}\n`;
+    });
+    context += `\nResponses:\n`;
 
     questions.forEach((q, idx) => {
       const timestamp = new Date(q.submitted_at).toLocaleString();
