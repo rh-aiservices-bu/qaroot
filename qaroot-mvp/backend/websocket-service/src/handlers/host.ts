@@ -141,4 +141,25 @@ export function handleHostEvents(io: Server, socket: HostSocket) {
       ended_at: new Date(),
     });
   });
+
+  /**
+   * Handle session updates (e.g., topic changes)
+   */
+  socket.on('session:update', async (data: { session_id: string; description?: string; session_status?: string }) => {
+    const { session_id, description, session_status } = data;
+
+    console.log('[Host] Session update:', { session_id, description, session_status });
+
+    // Broadcast session update to all participants
+    io.to(`session:${session_id}:participant`).emit('session:update', {
+      description,
+      session_status,
+    });
+
+    // Also broadcast to host room for multi-host scenarios
+    io.to(`session:${session_id}:host`).emit('session:update', {
+      description,
+      session_status,
+    });
+  });
 }

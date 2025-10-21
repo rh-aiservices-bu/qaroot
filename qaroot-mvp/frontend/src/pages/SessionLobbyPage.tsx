@@ -11,7 +11,7 @@ import {
   ModalVariant,
   Tooltip,
 } from '@patternfly/react-core';
-import { CopyIcon } from '@patternfly/react-icons';
+import { CopyIcon, AngleLeftIcon, AngleRightIcon } from '@patternfly/react-icons';
 import QRCode from 'qrcode';
 import { sessionsAPI } from '../services/api';
 import { connectSocket } from '../services/socket';
@@ -22,6 +22,7 @@ export default function SessionLobbyPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [iterationQuestions, setIterationQuestions] = useState<Map<number, string>>(new Map());
   const [participants, setParticipants] = useState(0);
   const [loading, setLoading] = useState(true);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
@@ -30,19 +31,29 @@ export default function SessionLobbyPage() {
   const [newQuestionDescription, setNewQuestionDescription] = useState('');
   const [newQuestionTimerDuration, setNewQuestionTimerDuration] = useState(60);
   const [urlCopied, setUrlCopied] = useState(false);
+  const [viewingIteration, setViewingIteration] = useState<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     if (!id) return;
 
-    // Fetch session details and questions
+    // Fetch session details, questions, and iteration questions
     Promise.all([
       sessionsAPI.get(id),
-      sessionsAPI.getQuestions(id)
-    ]).then(([sessionResponse, questionsResponse]) => {
+      sessionsAPI.getQuestions(id),
+      sessionsAPI.getIterationQuestions(id)
+    ]).then(([sessionResponse, questionsResponse, iterationQuestionsResponse]) => {
       const sessionData = sessionResponse.data.session;
       setSession(sessionData);
       setQuestions(questionsResponse.data.questions);
+
+      // Build map of iteration -> question_text
+      const iterQuestionsMap = new Map<number, string>();
+      iterationQuestionsResponse.data.iteration_questions.forEach(iq => {
+        iterQuestionsMap.set(iq.iteration, iq.question_text);
+      });
+      setIterationQuestions(iterQuestionsMap);
+
       setLoading(false);
 
       // Set QR code URL (QR generation happens in separate useEffect)
@@ -188,10 +199,24 @@ export default function SessionLobbyPage() {
       setShowNewQuestionModal(false);
       setNewQuestionDescription('');
       setNewQuestionTimerDuration(60); // Reset to default
+
+      // Refetch iteration questions to update the count
+      const iterationQuestionsResponse = await sessionsAPI.getIterationQuestions(id);
+      const iterQuestionsMap = new Map<number, string>();
+      iterationQuestionsResponse.data.iteration_questions.forEach(iq => {
+        iterQuestionsMap.set(iq.iteration, iq.question_text);
+      });
+      setIterationQuestions(iterQuestionsMap);
+
+      // Broadcast topic update to participants (but don't start collection)
       const socket = connectSocket();
-      socket.emit('collection:start', { session_id: id });
+      socket.emit('session:update', {
+        session_id: id,
+        description: response.data.session.description,
+        session_status: 'waiting'
+      });
     } catch (err) {
-      console.error('Failed to start new question:', err);
+      console.error('Failed to create new topic:', err);
     }
   };
 
@@ -226,6 +251,25 @@ export default function SessionLobbyPage() {
   const isPaused = session.session_status === 'paused';
   const isCompleted = session.session_status === 'completed';
 
+  // Get all iterations from iterationQuestions (includes topics without responses)
+  const iterations = Array.from(iterationQuestions.keys()).sort((a, b) => a - b);
+  const currentIterationForDisplay = viewingIteration ?? session.current_iteration;
+  const currentIterationIndex = iterations.indexOf(currentIterationForDisplay);
+  const canGoToPrevious = currentIterationIndex > 0;
+  const canGoToNext = currentIterationIndex < iterations.length - 1;
+
+  const handlePreviousTopic = () => {
+    if (canGoToPrevious) {
+      setViewingIteration(iterations[currentIterationIndex - 1]);
+    }
+  };
+
+  const handleNextTopic = () => {
+    if (canGoToNext) {
+      setViewingIteration(iterations[currentIterationIndex + 1]);
+    }
+  };
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem', height: '100%' }}>
       {/* Header */}
@@ -245,7 +289,7 @@ export default function SessionLobbyPage() {
         <Title headingLevel="h1" size="2xl">{session.title}</Title>
         <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
           <Badge isRead>{participants} Participants</Badge>
-          <Badge isRead>{questions.length} Questions</Badge>
+          <Badge isRead>{questions.length} Responses</Badge>
           <Badge isRead>Status: {session.session_status}</Badge>
         </div>
       </div>
@@ -292,9 +336,58 @@ export default function SessionLobbyPage() {
           {/* Controls */}
           <Card style={{ marginTop: '1rem' }}>
             <CardBody>
-              <Title headingLevel="h2" size="lg" style={{ marginBottom: '1rem' }}>
-                Controls
-              </Title>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <Title headingLevel="h2" size="lg" style={{ margin: 0 }}>
+                  Controls
+                </Title>
+                {iterations.length > 1 && (
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <Button
+                      variant="plain"
+                      onClick={handlePreviousTopic}
+                      isDisabled={!canGoToPrevious}
+                      icon={<AngleLeftIcon />}
+                      aria-label="Previous topic"
+                      style={{ minWidth: 'auto', padding: '0.25rem' }}
+                    />
+                    <div style={{
+                      fontSize: '0.875rem',
+                      color: '#151515',
+                      fontWeight: 400,
+                      minWidth: '80px',
+                      textAlign: 'center'
+                    }}>
+                      Topic {currentIterationForDisplay} of {iterations.length}
+                    </div>
+                    <Button
+                      variant="plain"
+                      onClick={handleNextTopic}
+                      isDisabled={!canGoToNext}
+                      icon={<AngleRightIcon />}
+                      aria-label="Next topic"
+                      style={{ minWidth: 'auto', padding: '0.25rem' }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Topic Text Display */}
+              {iterationQuestions.get(currentIterationForDisplay) && (
+                <div style={{
+                  padding: '1rem',
+                  backgroundColor: '#f0f0f0',
+                  borderRadius: '8px',
+                  marginBottom: '1rem',
+                  borderLeft: '4px solid #0066cc'
+                }}>
+                  <div style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.5rem', fontWeight: 600 }}>
+                    Topic
+                  </div>
+                  <div style={{ fontSize: '1rem', color: '#151515', lineHeight: '1.5' }}>
+                    {iterationQuestions.get(currentIterationForDisplay)}
+                  </div>
+                </div>
+              )}
 
               {/* Timer Display */}
               {isActive && timeRemaining !== null && (
@@ -306,12 +399,103 @@ export default function SessionLobbyPage() {
                   marginBottom: '1rem'
                 }}>
                   <div style={{
-                    fontSize: '3rem',
-                    fontWeight: 'bold',
-                    color: timeRemaining <= 10 ? '#c9190b' : '#151515',
-                    fontVariantNumeric: 'tabular-nums'
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginBottom: '0.5rem'
                   }}>
-                    {Math.floor(timeRemaining / 60)}:{String(timeRemaining % 60).padStart(2, '0')}
+                    {/* Minutes */}
+                    {String(Math.floor(timeRemaining / 60)).padStart(2, '0').split('').map((digit, idx) => (
+                      <div
+                        key={`min-${idx}`}
+                        style={{
+                          width: '60px',
+                          height: '80px',
+                          background: timeRemaining <= 10 ? 'linear-gradient(to bottom, #c9190b 50%, #a30000 50%)' : 'linear-gradient(to bottom, #151515 50%, #252525 50%)',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '3rem',
+                          fontWeight: 'bold',
+                          color: '#fff',
+                          boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          fontVariantNumeric: 'tabular-nums'
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: '50%',
+                            background: 'linear-gradient(to bottom, rgba(255,255,255,0.1), transparent)',
+                            borderRadius: '8px 8px 0 0'
+                          }}
+                        />
+                        <span style={{ position: 'relative', zIndex: 1 }}>{digit}</span>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: 0,
+                            right: 0,
+                            height: '1px',
+                            background: 'rgba(0,0,0,0.3)'
+                          }}
+                        />
+                      </div>
+                    ))}
+                    <span style={{ fontSize: '2rem', fontWeight: 'bold', color: timeRemaining <= 10 ? '#c9190b' : '#151515' }}>:</span>
+                    {/* Seconds */}
+                    {String(timeRemaining % 60).padStart(2, '0').split('').map((digit, idx) => (
+                      <div
+                        key={`sec-${idx}`}
+                        style={{
+                          width: '60px',
+                          height: '80px',
+                          background: timeRemaining <= 10 ? 'linear-gradient(to bottom, #c9190b 50%, #a30000 50%)' : 'linear-gradient(to bottom, #151515 50%, #252525 50%)',
+                          borderRadius: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '3rem',
+                          fontWeight: 'bold',
+                          color: '#fff',
+                          boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          fontVariantNumeric: 'tabular-nums'
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: '50%',
+                            background: 'linear-gradient(to bottom, rgba(255,255,255,0.1), transparent)',
+                            borderRadius: '8px 8px 0 0'
+                          }}
+                        />
+                        <span style={{ position: 'relative', zIndex: 1 }}>{digit}</span>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: 0,
+                            right: 0,
+                            height: '1px',
+                            background: 'rgba(0,0,0,0.3)'
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
                   <div style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.25rem' }}>
                     {timeRemaining <= 0 ? 'Time expired' : 'Time remaining'}
@@ -334,15 +518,18 @@ export default function SessionLobbyPage() {
                   <Button
                     variant="primary"
                     isBlock
-                    onClick={() => navigate(`/session/${id}/analysis`)}
-                    isDisabled={questions.length === 0}
+                    onClick={() => navigate(`/session/${id}/analysis?iteration=${currentIterationForDisplay}`)}
+                    isDisabled={questions.filter(q => q.iteration === currentIterationForDisplay).length === 0}
                   >
-                    View Analysis ({questions.length} questions)
+                    View Analysis ({questions.filter(q => q.iteration === currentIterationForDisplay).length} responses)
                   </Button>
                   <Button
                     variant="secondary"
                     isBlock
-                    onClick={() => setShowNewQuestionModal(true)}
+                    onClick={() => {
+                      setViewingIteration(null);
+                      setShowNewQuestionModal(true);
+                    }}
                     style={{ marginTop: '0.5rem' }}
                   >
                     New Topic
@@ -353,19 +540,41 @@ export default function SessionLobbyPage() {
           </Card>
         </div>
 
-        {/* Right Column: Question Counter */}
+        {/* Right Column: Response Counter */}
         <div>
           <Card style={{ minHeight: '500px' }}>
             <CardBody>
               <Title headingLevel="h2" size="lg" style={{ marginBottom: '1rem' }}>
-                Questions Submitted
+                Responses Submitted
               </Title>
-              <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-                <div style={{ fontSize: '6rem', fontWeight: 'bold', color: '#151515', lineHeight: 1 }}>
-                  {questions.length}
+              <div style={{ textAlign: 'center', padding: '2rem 2rem' }}>
+                {/* Current Topic Responses */}
+                <div style={{ marginBottom: '2rem' }}>
+                  <div style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.5rem', textTransform: 'uppercase', fontWeight: 600 }}>
+                    {viewingIteration !== null ? `Topic ${currentIterationForDisplay}` : 'Current Topic'}
+                  </div>
+                  <div style={{ fontSize: '4rem', fontWeight: 'bold', color: '#151515', lineHeight: 1 }}>
+                    {questions.filter(q => q.iteration === currentIterationForDisplay).length}
+                  </div>
+                  <div style={{ fontSize: '1rem', color: '#666', marginTop: '0.5rem' }}>
+                    {questions.filter(q => q.iteration === currentIterationForDisplay).length === 1 ? 'response' : 'responses'}
+                  </div>
                 </div>
-                <div style={{ fontSize: '1.25rem', color: '#666', marginTop: '1rem' }}>
-                  {questions.length === 1 ? 'question' : 'questions'} collected
+
+                {/* Divider */}
+                <div style={{ borderTop: '1px solid #d2d2d2', margin: '1.5rem 0' }} />
+
+                {/* Total Session Responses */}
+                <div>
+                  <div style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.5rem', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Total Session
+                  </div>
+                  <div style={{ fontSize: '3rem', fontWeight: 'bold', color: '#151515', lineHeight: 1 }}>
+                    {questions.length}
+                  </div>
+                  <div style={{ fontSize: '1rem', color: '#666', marginTop: '0.5rem' }}>
+                    {questions.length === 1 ? 'response' : 'responses'} collected
+                  </div>
                 </div>
               </div>
             </CardBody>
@@ -424,7 +633,7 @@ export default function SessionLobbyPage() {
             />
           </div>
           <p style={{ fontSize: '0.875rem', color: '#6a6e73', marginBottom: '1.5rem', lineHeight: '1.4' }}>
-            This will start a new round of question collection. Previous questions will be preserved.
+            This will create a new topic for collection. Previous responses will be preserved.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
             <Button variant="link" onClick={() => setShowNewQuestionModal(false)}>
@@ -435,7 +644,7 @@ export default function SessionLobbyPage() {
               onClick={handleNewQuestion}
               isDisabled={!newQuestionDescription.trim()}
             >
-              Start Collection
+              Create Topic
             </Button>
           </div>
         </div>

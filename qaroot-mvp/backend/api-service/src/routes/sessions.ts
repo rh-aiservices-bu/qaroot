@@ -190,9 +190,8 @@ router.post('/:id/new-question', authenticate, async (req: AuthRequest, res: Res
     // Build UPDATE query dynamically based on whether timer duration is provided
     let updateQuery = `UPDATE sessions
        SET description = $2,
-           session_status = 'active',
-           collection_started_at = NOW(),
-           actual_start = COALESCE(actual_start, NOW()),
+           session_status = 'waiting',
+           collection_started_at = NULL,
            current_iteration = current_iteration + 1`;
 
     const queryParams: any[] = [id, description.trim()];

@@ -298,12 +298,103 @@ export default function JoinPage() {
               marginBottom: '1rem'
             }}>
               <div style={{
-                fontSize: '2.5rem',
-                fontWeight: 'bold',
-                color: timeRemaining <= 10 ? '#c9190b' : '#151515',
-                fontVariantNumeric: 'tabular-nums'
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '0.5rem',
+                marginBottom: '0.5rem'
               }}>
-                {Math.floor(timeRemaining / 60)}:{String(timeRemaining % 60).padStart(2, '0')}
+                {/* Minutes */}
+                {String(Math.floor(timeRemaining / 60)).padStart(2, '0').split('').map((digit, idx) => (
+                  <div
+                    key={`min-${idx}`}
+                    style={{
+                      width: '60px',
+                      height: '80px',
+                      background: timeRemaining <= 10 ? 'linear-gradient(to bottom, #c9190b 50%, #a30000 50%)' : 'linear-gradient(to bottom, #151515 50%, #252525 50%)',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '3rem',
+                      fontWeight: 'bold',
+                      color: '#fff',
+                      boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      fontVariantNumeric: 'tabular-nums'
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '50%',
+                        background: 'linear-gradient(to bottom, rgba(255,255,255,0.1), transparent)',
+                        borderRadius: '8px 8px 0 0'
+                      }}
+                    />
+                    <span style={{ position: 'relative', zIndex: 1 }}>{digit}</span>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: 0,
+                        right: 0,
+                        height: '1px',
+                        background: 'rgba(0,0,0,0.3)'
+                      }}
+                    />
+                  </div>
+                ))}
+                <span style={{ fontSize: '2rem', fontWeight: 'bold', color: timeRemaining <= 10 ? '#c9190b' : '#151515' }}>:</span>
+                {/* Seconds */}
+                {String(timeRemaining % 60).padStart(2, '0').split('').map((digit, idx) => (
+                  <div
+                    key={`sec-${idx}`}
+                    style={{
+                      width: '60px',
+                      height: '80px',
+                      background: timeRemaining <= 10 ? 'linear-gradient(to bottom, #c9190b 50%, #a30000 50%)' : 'linear-gradient(to bottom, #151515 50%, #252525 50%)',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '3rem',
+                      fontWeight: 'bold',
+                      color: '#fff',
+                      boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      fontVariantNumeric: 'tabular-nums'
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '50%',
+                        background: 'linear-gradient(to bottom, rgba(255,255,255,0.1), transparent)',
+                        borderRadius: '8px 8px 0 0'
+                      }}
+                    />
+                    <span style={{ position: 'relative', zIndex: 1 }}>{digit}</span>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: 0,
+                        right: 0,
+                        height: '1px',
+                        background: 'rgba(0,0,0,0.3)'
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
               <div style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.25rem' }}>
                 {timeRemaining <= 0 ? 'Time expired' : 'Time remaining to submit'}

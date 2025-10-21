@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Title,
   Card,
@@ -46,6 +46,7 @@ interface IterationGroup {
 export default function AnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [iterations, setIterations] = useState<IterationGroup[]>([]);
   const [sessionTitle, setSessionTitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -128,6 +129,16 @@ export default function AnalysisPage() {
 
         const sortedIterations = Array.from(iterationMap.values()).sort((a, b) => a.iteration - b.iteration);
         setIterations(sortedIterations);
+
+        // Set initial round index based on URL query parameter
+        const iterationParam = searchParams.get('iteration');
+        if (iterationParam) {
+          const targetIteration = parseInt(iterationParam, 10);
+          const index = sortedIterations.findIndex(iter => iter.iteration === targetIteration);
+          if (index !== -1) {
+            setCurrentRoundIndex(index);
+          }
+        }
       } catch (err: any) {
         console.error('Failed to fetch analysis data:', err);
         setError('Failed to load analysis results');
@@ -137,7 +148,7 @@ export default function AnalysisPage() {
     };
 
     fetchData();
-  }, [id]);
+  }, [id, searchParams]);
 
   const handleAnalyzeIteration = async (iteration: number) => {
     if (!id) return;

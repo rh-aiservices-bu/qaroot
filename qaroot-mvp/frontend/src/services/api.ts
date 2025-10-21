@@ -75,9 +75,9 @@ export const sessionsAPI = {
 
   getQuestions: (id: string) => api.get<{ questions: Question[] }>(`/sessions/${id}/questions`),
 
-  getClusters: (id: string) => api.get<{ clusters: QuestionCluster[] }>(`/sessions/${id}/clusters`),
+  getIterationQuestions: (id: string) => api.get<{ iteration_questions: Array<{ id: string; session_id: string; iteration: number; question_text: string; created_at: string }> }>(`/sessions/${id}/iteration-questions`),
 
-  getIterationQuestions: (id: string) => api.get<{ iteration_questions: Array<{ iteration: number; question_text: string }> }>(`/sessions/${id}/iteration-questions`),
+  getClusters: (id: string) => api.get<{ clusters: QuestionCluster[] }>(`/sessions/${id}/clusters`),
 };
 
 // Chat API
