@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { LoginResponse, CreateSessionResponse, Session, Question, QuestionCluster, ChatMessage } from '../types';
+import type { LoginResponse, CreateSessionResponse, Session, Question, QuestionCluster, ChatMessage, User } from '../types';
 
 // Runtime config from window.ENV or build-time env
 // @ts-ignore
@@ -88,6 +88,19 @@ export const chatAPI = {
   getHistory: (sessionId: string) => api.get<{ messages: ChatMessage[] }>(`/sessions/${sessionId}/chat`),
 
   getDefaultPrompt: () => api.get<{ prompt: string }>(`/sessions/chat/default-prompt`),
+};
+
+// Users API
+export const usersAPI = {
+  list: () => api.get<{ users: User[] }>('/users'),
+
+  create: (data: { email: string; username: string; password: string; full_name?: string; role: 'host' | 'admin'; institution?: string }) =>
+    api.post<{ user: User }>('/users', data),
+
+  update: (id: string, data: { email?: string; username?: string; password?: string; full_name?: string; role?: 'host' | 'admin'; institution?: string; is_active?: boolean }) =>
+    api.put<{ user: User }>(`/users/${id}`, data),
+
+  delete: (id: string) => api.delete(`/users/${id}`),
 };
 
 export default api;

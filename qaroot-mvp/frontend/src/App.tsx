@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import SessionLobbyPage from './pages/SessionLobbyPage';
 import JoinPage from './pages/JoinPage';
 import AnalysisPage from './pages/AnalysisPage';
+import UsersPage from './pages/UsersPage';
 
 function AppContent() {
   const { isAuthenticated, loading } = useAuth();
@@ -47,6 +48,10 @@ function AppContent() {
             <Route
               path="/session/:id/analysis"
               element={isAuthenticated ? <AnalysisPage /> : <Navigate to="/login" />}
+            />
+            <Route
+              path="/users"
+              element={isAuthenticated ? <UsersPage /> : <Navigate to="/login" />}
             />
 
             {/* Default redirect */}

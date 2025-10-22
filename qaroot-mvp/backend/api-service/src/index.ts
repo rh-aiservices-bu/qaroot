@@ -10,6 +10,7 @@ import { connectAMQ, closeAMQ } from './services/queue';
 import authRoutes from './routes/auth';
 import sessionsRoutes from './routes/sessions';
 import chatRoutes from './routes/chat';
+import usersRoutes from './routes/users';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +54,7 @@ app.get('/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/sessions', sessionsRoutes);
 app.use('/api/v1/sessions', chatRoutes);
+app.use('/api/v1/users', usersRoutes);
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
