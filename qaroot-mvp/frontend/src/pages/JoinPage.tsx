@@ -438,7 +438,7 @@ export default function JoinPage() {
             isLoading={submitting}
             isDisabled={!canSubmit || !question.trim() || submitting}
           >
-            {submitting ? 'Submitting...' : 'Submit Question'}
+            {submitting ? 'Submitting...' : 'Submit'}
           </Button>
         </CardBody>
       </Card>
